@@ -1,8 +1,8 @@
 import streamlit as st
 from database import init_connection
-from modules import tanques, inventario, cargas, estaciones
+from modules import tanques, inventario, ventas, cargas, estaciones
 
-# Configuración de la página
+# Configuración de la página en modo ancho (wide)
 st.set_page_config(
     page_title="Gestión de Suministro - Gasolineras",
     page_icon="⛽",
@@ -12,13 +12,19 @@ st.set_page_config(
 st.title("⛽ Sistema de Gestión de Suministro y Inventarios")
 st.markdown("---")
 
-# Menú lateral de navegación ampliado
+# Menú lateral de navegación con todos los módulos integrados
 menu = st.sidebar.selectbox(
     "Selecciona un Módulo",
-    ["🏢 Catálogo de Estaciones", "📊 Estado de Tanques", "📝 Registro Histórico", "🚛 Programación de Cargas"]
+    [
+        "🏢 Catálogo de Estaciones", 
+        "📊 Estado de Tanques", 
+        "📝 Registro de Inventarios", 
+        "📊 Registro de Ventas", 
+        "🚛 Programación de Cargas"
+    ]
 )
 
-# Conexión activa a la base de datos
+# Conexión activa a la base de datos de Supabase
 conn = init_connection()
 
 if conn:
@@ -26,8 +32,10 @@ if conn:
         estaciones.render(conn)
     elif menu == "📊 Estado de Tanques":
         tanques.render(conn)
-    elif menu == "📝 Registro Histórico":
+    elif menu == "📝 Registro de Inventarios":
         inventario.render(conn)
+    elif menu == "📊 Registro de Ventas":
+        ventas.render(conn)
     elif menu == "🚛 Programación de Cargas":
         cargas.render(conn)
     
