@@ -40,15 +40,18 @@ def render(conn):
             return
 
         # 3. Buscar si ya existen registros previos para esta fecha y turno para precargarlos
-        placeholders = tuple(df_estaciones["ID"].tolist())
-        placeholders_str = f"('{I}'" + "".join([f", '{I}'" for I in placeholders[1:]]) + ")" if len(placeholders) > 1 else f"('{placeholders[0]}')"
+        ids_estaciones = tuple(df_estaciones["ID"].tolist())
+        if len(ids_estaciones) == 1:
+            ids_str = f"('{ids_estaciones[0]}')"
+        else:
+            ids_str = str(ids_estaciones)
         
         query_exist = f"""
             SELECT estacion_id, regular, premium, diesel 
             FROM inventarios_historico 
             WHERE fecha = '{fecha_registro}' 
               AND turno = '{turno_seleccionado}'
-              AND estacion_id IN {placeholders_str};
+              AND estacion_id IN {ids_str};
         """
         df_existentes = pd.read_sql(query_exist, conn)
 
