@@ -1,6 +1,6 @@
 import streamlit as st
 from database import init_connection
-from modules import tanques, inventario, cargas
+from modules import tanques, inventario, cargas, estaciones
 
 # Configuración de la página
 st.set_page_config(
@@ -12,17 +12,19 @@ st.set_page_config(
 st.title("⛽ Sistema de Gestión de Suministro y Inventarios")
 st.markdown("---")
 
-# Menú lateral de navegación
+# Menú lateral de navegación ampliado
 menu = st.sidebar.selectbox(
     "Selecciona un Módulo",
-    ["📊 Estado de Tanques", "📝 Registro Histórico", "🚛 Programación de Cargas"]
+    ["🏢 Catálogo de Estaciones", "📊 Estado de Tanques", "📝 Registro Histórico", "🚛 Programación de Cargas"]
 )
 
 # Conexión activa a la base de datos
 conn = init_connection()
 
 if conn:
-    if menu == "📊 Estado de Tanques":
+    if menu == "🏢 Catálogo de Estaciones":
+        estaciones.render(conn)
+    elif menu == "📊 Estado de Tanques":
         tanques.render(conn)
     elif menu == "📝 Registro Histórico":
         inventario.render(conn)
