@@ -2,18 +2,28 @@ import streamlit as st
 import pandas as pd
 
 def render(conn):
-    st.header("⛽ Catálogo de Estaciones de Servicio")
-    st.write("Administra la clasificación, plazas y terminales (TAD) de la red.")
+    st.header("🏢 Catálogo de Estaciones de Servicio")
+    st.write("Red operativa de estaciones clasificadas por Plaza y Terminal de Abastecimiento (TAD).")
     
-    # Pestañas internas para organizar la vista y el registro
-    tab1, tab2 = st.tabs(["📋 Listado de Estaciones", "➕ Registrar Nueva Estación"])
+    tab1, tab2 = st.tabs(["📋 Listado General", "➕ Registrar Nueva Estación"])
     
     with tab1:
         try:
-            query = "SELECT id AS \"ID\", nombre AS \"Nombre Comercial\", plaza AS \"Plaza\", tad AS \"TAD\" FROM estaciones ORDER BY id;"
+            query = "SELECT id AS \"ID\", nombre AS \"Nombre Comercial\", plaza AS \"Plaza\", tad AS \"TAD\" FROM estaciones ORDER BY plaza, id;"
             df_estaciones = pd.read_sql(query, conn)
+            
             if not df_estaciones.empty:
-                st.dataframe(df_estaciones, use_container_width=True, hide_index=True)
+                # Filtro rápido por Plaza
+                plazas_disponibles = ["Todas"] + list(df_estaciones["Plaza"].unique())
+                plaza_seleccionada = st.selectbox("Filtrar por Plaza / Ciudad", plazas_disponibles)
+                
+                if plaza_seleccionada != "Todas":
+                    df_filtrado = df_estaciones[df_estaciones["Plaza"] == plaza_seleccionada]
+                else:
+                    df_filtrado = df_estaciones
+                    
+                st.metric("Total de Estaciones Mostradas", len(df_filtrado))
+                st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
             else:
                 st.info("No hay estaciones registradas en la base de datos todavía.")
         except Exception as e:
@@ -27,8 +37,8 @@ def render(conn):
                 est_id = st.text_input("ID de Estación (ej. E12345)")
                 nombre = st.text_input("Nombre Comercial Práctico")
             with col2:
-                plaza = st.selectbox("Plaza / Ciudad", ["Mexicali", "SLRC", "Hermosillo", "Otra"])
-                tad = st.text_input("TAD (Número de Terminal, ej. 150)")
+                plaza = st.text_input("Plaza / Ciudad (ej. Mexicali, San Luis, Hermosillo)")
+                tad = st.text_input("TAD (Número de Terminal, ej. 638)")
                 
             submitted = st.form_submit_button("Guardar Estación")
             if submitted:
