@@ -3,8 +3,8 @@ import pandas as pd
 from datetime import date
 
 def render(conn):
-    st.header("📝 Captura Masiva de Inventarios por Programador")
-    st.write("Registra los volúmenes de combustible de forma rápida en formato de tabla para tus estaciones asignadas.")
+    # Título y descripción más compactos para ganar espacio vertical
+    st.markdown("### 📝 Captura Masiva de Inventarios")
     
     try:
         # 1. Obtener la lista de programadores
@@ -15,14 +15,14 @@ def render(conn):
             st.warning("No hay programadores asignados en las estaciones.")
             return
 
-        # Controles superiores: Fecha, Turno y Usuario
-        col_f1, col_f2, col_f3 = st.columns(3)
+        # Controles superiores en una sola fila compacta
+        col_f1, col_f2, col_f3 = st.columns([1.2, 1, 1.2])
         with col_f1:
-            fecha_registro = st.date_input("Fecha de Inventario", date.today())
+            fecha_registro = st.date_input("Fecha", date.today())
         with col_f2:
-            turno_seleccionado = st.selectbox("Turno / Hora", ["06:00 AM", "02:00 PM", "10:00 PM"])
+            turno_seleccionado = st.selectbox("Turno", ["06:00 AM", "02:00 PM", "10:00 PM"])
         with col_f3:
-            usuario_seleccionado = st.selectbox("👤 Programador", df_prog["usuario"].tolist())
+            usuario_seleccionado = st.selectbox("Programador", df_prog["usuario"].tolist())
         
         st.markdown("---")
 
@@ -39,7 +39,7 @@ def render(conn):
             st.warning(f"El usuario {usuario_seleccionado} no tiene estaciones asignadas.")
             return
 
-        # 3. Buscar si ya existen registros previos para esta fecha y turno para precargarlos
+        # 3. Buscar si ya existen registros previos para esta fecha y turno
         ids_estaciones = tuple(df_estaciones["ID"].tolist())
         if len(ids_estaciones) == 1:
             ids_str = f"('{ids_estaciones[0]}')"
@@ -55,22 +55,26 @@ def render(conn):
         """
         df_existentes = pd.read_sql(query_exist, conn)
 
-        # Preparar el DataFrame combinando las estaciones con sus valores (si ya existen) o en 0.0
-        df_estaciones["Regular"] = 0.0
-        df_estaciones["Premium"] = 0.0
-        df_estaciones["Diesel"] = 0.0
+        # Preparar columnas de litros como enteros
+        df_estaciones["Regular"] = 0
+        df_estaciones["Premium"] = 0
+        df_estaciones["Diesel"] = 0
 
         if not df_existentes.empty:
             for idx, row in df_estaciones.iterrows():
                 match = df_existentes[df_existentes["estacion_id"] == row["ID"]]
                 if not match.empty:
-                    df_estaciones.loc[idx, "Regular"] = float(match.iloc[0]["regular"])
-                    df_estaciones.loc[idx, "Premium"] = float(match.iloc[0]["premium"])
-                    df_estaciones.loc[idx, "Diesel"] = float(match.iloc[0]["diesel"])
+                    df_estaciones.loc[idx, "Regular"] = int(match.iloc[0]["regular"])
+                    df_estaciones.loc[idx, "Premium"] = int(match.iloc[0]["premium"])
+                    df_estaciones.loc[idx, "Diesel"] = int(match.iloc[0]["diesel"])
 
-        st.info(f"Mostrando **{len(df_estaciones)} estaciones** asignadas a **{usuario_seleccionado}** para el turno de las **{turno_seleccionado}** del día **{fecha_registro}**.")
+        st.caption(f"Mostrando **{len(df_estaciones)} estaciones** asignadas a **{usuario_seleccionado}** (Turno: **{turno_seleccionado}**, Fecha: **{fecha_registro}**).")
 
-        # 4. Tabla interactiva editable estilo Excel
+        # Función para aplicar colores intercalados (efecto cebra)
+        def color_alternado(row):
+            return ['background-color: #1e1e1e' if row.name % 2 == 0 else 'background-color: #262626' for _ in row]
+
+        # 4. Tabla interactiva con formato numérico entero y separador de miles
         with st.form("form_captura_masiva"):
             df_editado = st.data_editor(
                 df_estaciones,
@@ -79,16 +83,17 @@ def render(conn):
                     "TAD": st.column_config.TextColumn("TAD", disabled=True),
                     "Plaza": st.column_config.TextColumn("Plaza", disabled=True),
                     "Estacion": st.column_config.TextColumn("Estacion", disabled=True),
-                    "Regular": st.column_config.NumberColumn("Regular (Lts)", min_value=0.0, format="%.2f", step=100.0),
-                    "Premium": st.column_config.NumberColumn("Premium (Lts)", min_value=0.0, format="%.2f", step=100.0),
-                    "Diesel": st.column_config.NumberColumn("Diesel (Lts)", min_value=0.0, format="%.2f", step=100.0),
+                    "Regular": st.column_config.NumberColumn("Regular (Lts)", min_value=0, format="%d", step=100),
+                    "Premium": st.column_config.NumberColumn("Premium (Lts)", min_value=0, format="%d", step=100),
+                    "Diesel": st.column_config.NumberColumn("Diesel (Lts)", min_value=0, format="%d", step=100),
                 },
                 hide_index=True,
                 use_container_width=True,
-                num_rows="fixed"
+                num_rows="fixed",
+                height=550 # Altura generosa para ver la lista completa sin batallar con scroll vertical
             )
             
-            submitted = st.form_submit_button("💾 Guardar / Actualizar Inventarios")
+            submitted = st.form_submit_button("💾 Guardar / Actualizar Inventarios", use_container_width=True)
             
             if submitted:
                 try:
@@ -107,7 +112,7 @@ def render(conn):
                         )
                     conn.commit()
                     cursor.close()
-                    st.success(f"¡Inventarios actualizados exitosamente para el turno {turno_seleccionado} ({usuario_seleccionado})!")
+                    st.success(f"¡Inventarios guardados correctamente para el turno {turno_seleccionado}!")
                 except Exception as e:
                     st.error(f"Error al guardar los registros en la base de datos: {e}")
 
