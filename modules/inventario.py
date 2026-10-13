@@ -3,8 +3,30 @@ import pandas as pd
 from datetime import date
 
 def render(conn):
-    # Título y descripción más compactos para ganar espacio vertical
     st.markdown("### 📝 Captura Masiva de Inventarios")
+    
+    # CSS personalizado para:
+    # 1. Colores intercalados (efecto cebra) en el data_editor.
+    # 2. Reducir la altura/espacio entre filas (padding vertical compacto).
+    st.markdown("""
+        <style>
+        /* Compactar altura de filas en el editor de datos */
+        div[data-testid="stDataEditor"] tr {
+            height: 32px !important;
+        }
+        div[data-testid="stDataEditor"] td {
+            padding-top: 2px !important;
+            padding-bottom: 2px !important;
+        }
+        /* Filas cebra intercaladas */
+        div[data-testid="stDataEditor"] tbody tr:nth-child(odd) {
+            background-color: #1a1a1a !important;
+        }
+        div[data-testid="stDataEditor"] tbody tr:nth-child(even) {
+            background-color: #262626 !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
     
     try:
         # 1. Obtener la lista de programadores
@@ -15,7 +37,7 @@ def render(conn):
             st.warning("No hay programadores asignados en las estaciones.")
             return
 
-        # Controles superiores en una sola fila compacta
+        # Controles superiores compactos
         col_f1, col_f2, col_f3 = st.columns([1.2, 1, 1.2])
         with col_f1:
             fecha_registro = st.date_input("Fecha", date.today())
@@ -70,11 +92,7 @@ def render(conn):
 
         st.caption(f"Mostrando **{len(df_estaciones)} estaciones** asignadas a **{usuario_seleccionado}** (Turno: **{turno_seleccionado}**, Fecha: **{fecha_registro}**).")
 
-        # Función para aplicar colores intercalados (efecto cebra)
-        def color_alternado(row):
-            return ['background-color: #1e1e1e' if row.name % 2 == 0 else 'background-color: #262626' for _ in row]
-
-        # 4. Tabla interactiva con formato numérico entero y separador de miles
+        # 4. Tabla interactiva con formato numérico de miles (",") y enteros
         with st.form("form_captura_masiva"):
             df_editado = st.data_editor(
                 df_estaciones,
@@ -83,14 +101,14 @@ def render(conn):
                     "TAD": st.column_config.TextColumn("TAD", disabled=True),
                     "Plaza": st.column_config.TextColumn("Plaza", disabled=True),
                     "Estacion": st.column_config.TextColumn("Estacion", disabled=True),
-                    "Regular": st.column_config.NumberColumn("Regular (Lts)", min_value=0, format="%d", step=100),
-                    "Premium": st.column_config.NumberColumn("Premium (Lts)", min_value=0, format="%d", step=100),
-                    "Diesel": st.column_config.NumberColumn("Diesel (Lts)", min_value=0, format="%d", step=100),
+                    "Regular": st.column_config.NumberColumn("Regular (Lts)", min_value=0, format="%,d", step=100),
+                    "Premium": st.column_config.NumberColumn("Premium (Lts)", min_value=0, format="%,d", step=100),
+                    "Diesel": st.column_config.NumberColumn("Diesel (Lts)", min_value=0, format="%,d", step=100),
                 },
                 hide_index=True,
                 use_container_width=True,
                 num_rows="fixed",
-                height=550 # Altura generosa para ver la lista completa sin batallar con scroll vertical
+                height=550
             )
             
             submitted = st.form_submit_button("💾 Guardar / Actualizar Inventarios", use_container_width=True)
