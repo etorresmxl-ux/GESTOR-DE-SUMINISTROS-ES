@@ -33,12 +33,12 @@ def render(conn):
             st.warning("No hay programadores asignados en las estaciones.")
             return
 
-        # Controles superiores compactos
+        # Controles superiores compactos (Turnos en formato 24 horas)
         col_f1, col_f2, col_f3 = st.columns([1.2, 1, 1.2])
         with col_f1:
             fecha_registro = st.date_input("Fecha", date.today())
         with col_f2:
-            turno_seleccionado = st.selectbox("Turno", ["06:00 AM", "02:00 PM", "10:00 PM"])
+            turno_seleccionado = st.selectbox("Turno", ["06:00", "14:00", "22:00"])
         with col_f3:
             usuario_seleccionado = st.selectbox("Programador", df_prog["usuario"].tolist())
         
@@ -57,7 +57,7 @@ def render(conn):
             st.warning(f"El usuario {usuario_seleccionado} no tiene estaciones asignadas.")
             return
 
-        # 3. Buscar si ya existen registros previos para esta fecha y turno
+        # 3. Buscar si ya existen registros previos para esta fecha y turno (24 hrs)
         ids_estaciones = tuple(df_estaciones["ID"].tolist())
         if len(ids_estaciones) == 1:
             ids_str = f"('{ids_estaciones[0]}')"
