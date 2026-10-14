@@ -3,9 +3,9 @@ import pandas as pd
 
 def render(conn):
     st.markdown("### 📊 Dashboard Operativo - Inventarios y Días de Suministro (D/S)")
-    st.write("Resumen general por estación: Inventario actual de litros y días de cobertura según su VDP.")
+    st.write("Resumen general por estación: Inventario actual y Días de Suministro calculados con VDP ponderada (12 semanas).")
     
-    # Consulta SQL optimizada para obtener estación, último inventario por producto y su VDP
+    # Consulta optimizada que une el catálogo, el último inventario y la nueva vista de VDP ponderado
     query = """
         WITH ultimo_inventario AS (
             SELECT 
@@ -26,13 +26,14 @@ def render(conn):
             COALESCE(ui.regular, 0) as reg_litros,
             COALESCE(ui.premium, 0) as pre_litros,
             COALESCE(ui.diesel, 0) as die_litros,
-            -- VDP por producto desde estaciones_detalle
-            MAX(CASE WHEN e.producto = 'Regular' THEN e.vdp ELSE 0 END) as vdp_reg,
-            MAX(CASE WHEN e.producto = 'Premium' THEN e.vdp ELSE 0 END) as vdp_pre,
-            MAX(CASE WHEN e.producto = 'Diesel' THEN e.vdp ELSE 0 END) as vdp_die
+            -- VDP Ponderado obtenido desde la vista que creamos
+            COALESCE(vp.vdp_regular, 0) as vdp_reg,
+            COALESCE(vp.vdp_premium, 0) as vdp_pre,
+            COALESCE(vp.vdp_diesel, 0) as vdp_die
         FROM estaciones_detalle e
         LEFT JOIN ultimo_inventario ui ON e.id_estacion = ui.estacion_id AND ui.rn = 1
-        GROUP BY e.id_estacion, e.proveedor, e.tad, e.plaza, e.nombre, ui.regular, ui.premium, ui.diesel
+        LEFT JOIN vdp_ponderado_12w vp ON e.id_estacion = vp.estacion_id
+        GROUP BY e.id_estacion, e.proveedor, e.tad, e.plaza, e.nombre, ui.regular, ui.premium, ui.diesel, vp.vdp_regular, vp.vdp_premium, vp.vdp_diesel
         ORDER BY e.id_estacion;
     """
     
@@ -43,7 +44,7 @@ def render(conn):
             st.warning("No hay datos suficientes para generar el resumen.")
             return
 
-        # Construcción de la tabla final con formato idéntico al solicitado
+        # Construcción de la tabla final
         tabla_final = pd.DataFrame({
             "Proveedor": df['proveedor'],
             "ID": df['id_estacion'],
