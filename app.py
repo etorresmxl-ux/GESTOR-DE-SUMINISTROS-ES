@@ -1,6 +1,7 @@
 import streamlit as st
 from database import init_connection
-from modules import tanques, inventario, ventas, cargas, estaciones, importador
+--# Importa tu nuevo módulo dashboard junto con los demás
+from modules import tanques, inventario, ventas, cargas, estaciones, importador, dashboard
 
 st.set_page_config(
     page_title="Gestión de Suministro - Gasolineras",
@@ -11,9 +12,11 @@ st.set_page_config(
 st.title("⛽ Sistema de Gestión de Suministro e Inventarios")
 st.markdown("---")
 
+--# Agrega "📊 Dashboard Operativo" como la primera opción del menú (o donde prefieras)
 menu = st.sidebar.selectbox(
     "Selecciona un Módulo",
     [
+        "📊 Dashboard Operativo",
         "🏢 Catálogo de Estaciones", 
         "📥 Importar Masivos (CSV)",
         "📊 Estado de Tanques", 
@@ -26,7 +29,9 @@ menu = st.sidebar.selectbox(
 conn = init_connection()
 
 if conn:
-    if menu == "🏢 Catálogo de Estaciones":
+    if menu == "📊 Dashboard Operativo":
+        dashboard.render(conn)
+    elif menu == "🏢 Catálogo de Estaciones":
         estaciones.render(conn)
     elif menu == "📥 Importar Masivos (CSV)":
         importador.render(conn)
