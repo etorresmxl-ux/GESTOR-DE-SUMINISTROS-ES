@@ -4,7 +4,7 @@ import numpy as np
 
 def render(conn):
     st.markdown("### 📊 Dashboard Operativo - Inventarios, Espacio Disponible y Días de Suministro (D/S)")
-    st.write("Resumen general por estación: Inventario actual, capacidad disponible y Días de Suministro calculados con VDP ponderada (12 semanas).")
+    st.write("Resumen general por estación: Inventario actual, capacidad máxima permitida y Días de Suministro calculados con VDP ponderada (12 semanas).")
     
     query = """
         WITH ultimo_inventario AS (
@@ -66,10 +66,10 @@ def render(conn):
         df['ds_p'] = df.apply(lambda r: round(r['pre_litros'] / r['vdp_pre'], 1) if r['cap_premium'] > 0 and r['vdp_pre'] > 0 else np.nan, axis=1)
         df['ds_d'] = df.apply(lambda r: round(r['die_litros'] / r['vdp_die'], 1) if r['cap_diesel'] > 0 and r['vdp_die'] > 0 else np.nan, axis=1)
 
-        # Calcular espacio disponible para recibir producto al 90% de su capacidad máxima
-        df['espacio_r'] = df.apply(lambda r: max(0, (r['cap_regular'] * 0.90) - r['reg_litros']) if r['cap_regular'] > 0 else np.nan, axis=1)
-        df['espacio_p'] = df.apply(lambda r: max(0, (r['cap_premium'] * 0.90) - r['pre_litros']) if r['cap_premium'] > 0 else np.nan, axis=1)
-        df['espacio_d'] = df.apply(lambda r: max(0, (r['cap_diesel'] * 0.90) - r['die_litros']) if r['cap_diesel'] > 0 else np.nan, axis=1)
+        # Calcular espacio disponible usando estrictamente la capacidad_maxima definitiva de la base de datos
+        df['espacio_r'] = df.apply(lambda r: max(0, r['cap_regular'] - r['reg_litros']) if r['cap_regular'] > 0 else np.nan, axis=1)
+        df['espacio_p'] = df.apply(lambda r: max(0, r['cap_premium'] - r['pre_litros']) if r['cap_premium'] > 0 else np.nan, axis=1)
+        df['espacio_d'] = df.apply(lambda r: max(0, r['cap_diesel'] - r['die_litros']) if r['cap_diesel'] > 0 else np.nan, axis=1)
 
         # ==========================================
         # 1. CENTRO DE ALERTAS PRIORIZADAS (PRIMERO)
@@ -149,7 +149,7 @@ def render(conn):
 
         df['semaforo'] = df.apply(calcular_semaforo, axis=1)
 
-        # Construcción de la tabla visual integrando inventario, espacio disponible al 90% y D/S (con N/A si no aplica)
+        # Construcción de la tabla visual integrando inventario, capacidad máxima y D/S (con N/A si no aplica)
         tabla_vis = pd.DataFrame({
             "Semáforo": df['semaforo'],
             "ID": df['id_estacion'].astype(str),
@@ -157,10 +157,10 @@ def render(conn):
             "Plaza": df['plaza'].astype(str),
             "Estación": df['estacion'].astype(str),
             
-            # Inventarios actuales / Espacio al 90%
-            "Reg (Inv / Cap.Max)": df.apply(lambda r: f"{r['reg_litros']:,.0f} L (Faltan {r['espacio_r']:,.0f} L)" if r['cap_regular'] > 0 else "N/A", axis=1),
-            "Pre (Inv / Cap.Max)": df.apply(lambda r: f"{r['pre_litros']:,.0f} L (Faltan {r['espacio_p']:,.0f} L)" if r['cap_premium'] > 0 else "N/A", axis=1),
-            "Die (Inv / Cap.Max)": df.apply(lambda r: f"{r['die_litros']:,.0f} L (Faltan {r['espacio_d']:,.0f} L)" if r['cap_diesel'] > 0 else "N/A", axis=1),
+            # Inventarios actuales / Capacidad Máxima
+            "Reg (Inv / Cap.Max)": df.apply(lambda r: f"{r['reg_litros']:,.0f} L / {r['cap_regular']:,.0f} L" if r['cap_regular'] > 0 else "N/A", axis=1),
+            "Pre (Inv / Cap.Max)": df.apply(lambda r: f"{r['pre_litros']:,.0f} L / {r['cap_premium']:,.0f} L" if r['cap_premium'] > 0 else "N/A", axis=1),
+            "Die (Inv / Cap.Max)": df.apply(lambda r: f"{r['die_litros']:,.0f} L / {r['cap_diesel']:,.0f} L" if r['cap_diesel'] > 0 else "N/A", axis=1),
             
             # Días de Suministro
             "D/S R": df.apply(lambda r: f"{r['ds_r']:.1f}" if r['cap_regular'] > 0 and pd.notna(r['ds_r']) else "N/A", axis=1),
