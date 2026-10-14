@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 
 def render(conn):
-    st.markdown("### 📊 Dashboard Operativo - Inventarios y Días de Suministro (D/S)")
-    st.write("Resumen general por estación: Inventario actual y Días de Suministro calculados con VDP ponderada (12 semanas).")
+    st.markdown("### 📊 Dashboard Operativo - Inventarios, Espacio Disponible y Días de Suministro (D/S)")
+    st.write("Resumen general por estación: Inventario actual, capacidad disponible al 90% y Días de Suministro calculados con VDP ponderada (12 semanas).")
     
     query = """
         WITH ultimo_inventario AS (
@@ -21,6 +21,9 @@ def render(conn):
             e.tad,
             e.plaza,
             e.nombre as estacion,
+            e.cap_regular,
+            e.cap_premium,
+            e.cap_diesel,
             COALESCE(ui.regular, 0) as reg_litros,
             COALESCE(ui.premium, 0) as pre_litros,
             COALESCE(ui.diesel, 0) as die_litros,
@@ -30,7 +33,8 @@ def render(conn):
         FROM estaciones_detalle e
         LEFT JOIN ultimo_inventario ui ON e.id_estacion = ui.estacion_id AND ui.rn = 1
         LEFT JOIN vdp_ponderado_12w vp ON e.id_estacion = vp.estacion_id
-        GROUP BY e.id_estacion, e.tad, e.plaza, e.nombre, ui.regular, ui.premium, ui.diesel, vp.vdp_regular, vp.vdp_premium, vp.vdp_diesel
+        GROUP BY e.id_estacion, e.tad, e.plaza, e.nombre, e.cap_regular, e.cap_premium, e.cap_diesel, 
+                 ui.regular, ui.premium, ui.diesel, vp.vdp_regular, vp.vdp_premium, vp.vdp_diesel
         ORDER BY e.id_estacion;
     """
     
@@ -41,26 +45,35 @@ def render(conn):
             st.warning("No hay datos suficientes para generar el resumen.")
             return
 
-        # Calcular los días de suministro numéricos exactos
-        df['ds_r'] = df.apply(lambda r: round(r['reg_litros'] / r['vdp_reg'], 1) if r['vdp_reg'] > 0 else np.nan, axis=1)
-        df['ds_p'] = df.apply(lambda r: round(r['pre_litros'] / r['vdp_pre'], 1) if r['vdp_pre'] > 0 else np.nan, axis=1)
-        df['ds_d'] = df.apply(lambda r: round(r['die_litros'] / r['vdp_die'], 1) if r['vdp_die'] > 0 else np.nan, axis=1)
+        # Calcular días de suministro solo si la estación vende el producto (capacidad > 0 y vdp > 0)
+        df['ds_r'] = df.apply(lambda r: round(r['reg_litros'] / r['vdp_reg'], 1) if r['cap_regular'] > 0 and r['vdp_reg'] > 0 else np.nan, axis=1)
+        df['ds_p'] = df.apply(lambda r: round(r['pre_litros'] / r['vdp_pre'], 1) if r['cap_premium'] > 0 and r['vdp_pre'] > 0 else np.nan, axis=1)
+        df['ds_d'] = df.apply(lambda r: round(r['die_litros'] / r['vdp_die'], 1) if r['cap_diesel'] > 0 and r['vdp_die'] > 0 else np.nan, axis=1)
 
-        # Construcción directa de la tabla visual con texto formateado para evitar errores de tipo en Streamlit
+        # Calcular espacio disponible para recibir producto al 90% de su capacidad máxima
+        # (Capacidad Total * 0.90) - Inventario Actual
+        df['espacio_r'] = df.apply(lambda r: max(0, (r['cap_regular'] * 0.90) - r['reg_litros']) if r['cap_regular'] > 0 else np.nan, axis=1)
+        df['espacio_p'] = df.apply(lambda r: max(0, (r['cap_premium'] * 0.90) - r['pre_litros']) if r['cap_premium'] > 0 else np.nan, axis=1)
+        df['espacio_d'] = df.apply(lambda r: max(0, (r['cap_diesel'] * 0.90) - r['die_litros']) if r['cap_diesel'] > 0 else np.nan, axis=1)
+
+        # Construcción de la tabla visual integrando inventario, espacio disponible al 90% y D/S
         tabla_vis = pd.DataFrame({
             "ID": df['id_estacion'].astype(str),
             "TAD": df['tad'].astype(str),
             "Plaza": df['plaza'].astype(str),
             "Estación": df['estacion'].astype(str),
-            "Regular": df['reg_litros'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-"),
-            "Premium": df['pre_litros'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-"),
-            "Diesel": df['die_litros'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-"),
+            
+            # Inventarios actuales / Espacio al 90%
+            "Reg (Inv / Esp 90%)": df.apply(lambda r: f"{r['reg_litros']:,.0f} L (Faltan {r['espacio_r']:,.0f} L)" if r['cap_regular'] > 0 else "-", axis=1),
+            "Pre (Inv / Esp 90%)": df.apply(lambda r: f"{r['pre_litros']:,.0f} L (Faltan {r['espacio_p']:,.0f} L)" if r['cap_premium'] > 0 else "-", axis=1),
+            "Die (Inv / Esp 90%)": df.apply(lambda r: f"{r['die_litros']:,.0f} L (Faltan {r['espacio_d']:,.0f} L)" if r['cap_diesel'] > 0 else "-", axis=1),
+            
+            # Días de Suministro
             "D/S R": df['ds_r'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-"),
             "D/S P": df['ds_p'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-"),
             "D/S D": df['ds_d'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-"),
         })
 
-        # Mostrar tabla principal sin estilos complejos
         st.dataframe(tabla_vis, width='stretch', height=450, hide_index=True)
 
         # ==========================================
@@ -71,12 +84,14 @@ def render(conn):
         
         alertas = []
         for _, r in df.iterrows():
-            productos = [('Regular', r['ds_r'], r['reg_litros']), 
-                         ('Premium', r['ds_p'], r['pre_litros']), 
-                         ('Diesel', r['ds_d'], r['die_litros'])]
+            productos = [
+                ('Regular', r['ds_r'], r['reg_litros'], r['cap_regular'], r['espacio_r']), 
+                ('Premium', r['ds_p'], r['pre_litros'], r['cap_premium'], r['espacio_p']), 
+                ('Diesel', r['ds_d'], r['die_litros'], r['cap_diesel'], r['espacio_d'])
+            ]
             
-            for prod, ds, litros in productos:
-                if pd.notna(ds):
+            for prod, ds, litros, cap, espacio in productos:
+                if cap > 0 and pd.notna(ds):
                     if ds < 1.0:
                         alertas.append({
                             "prioridad": 1, 
@@ -85,7 +100,8 @@ def render(conn):
                             "plaza": str(r['plaza']),
                             "producto": prod,
                             "ds": ds,
-                            "litros": litros
+                            "litros": litros,
+                            "espacio": espacio
                         })
                     elif ds < 2.0:
                         alertas.append({
@@ -95,7 +111,8 @@ def render(conn):
                             "plaza": str(r['plaza']),
                             "producto": prod,
                             "ds": ds,
-                            "litros": litros
+                            "litros": litros,
+                            "espacio": espacio
                         })
 
         if not alertas:
@@ -110,6 +127,7 @@ def render(conn):
                 "Plaza": df_alertas['plaza'],
                 "Producto": df_alertas['producto'],
                 "Inventario Actual": df_alertas['litros'].apply(lambda x: f"{x:,.0f} L"),
+                "Espacio para 90%": df_alertas['espacio'].apply(lambda x: f"{x:,.0f} L"),
                 "Días de Suministro": df_alertas['ds'].apply(lambda x: f"{x:.1f} días")
             })
             
