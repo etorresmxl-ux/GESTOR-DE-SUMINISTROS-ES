@@ -154,4 +154,4 @@ def render(conn):
             st.markdown("")
 
     except Exception as e:
-        st.error(f"Error al generar el módulo de programación: {e}")
+        st.error(f"Error al generar el módulo de programación de cargas: {e}")
