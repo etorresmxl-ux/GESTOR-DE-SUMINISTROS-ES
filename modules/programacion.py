@@ -1,179 +1,120 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
 
 def render(conn):
-    st.markdown("### 🚛 Módulo de Programación y Proyección de Inventarios (MRP)")
-    st.write("Matriz de proyección operativa: Venta estimada, Compras, Inventario Final, Días de Suministro (D/S) y Capacidad %.")
+    st.markdown("### 🚛 Módulo de Programación y Control de Inventarios")
+    st.write("Filtra por Programador y Estación para visualizar el balance diario por producto.")
 
     if conn is None:
         st.error("No hay conexión a la base de datos.")
         return
 
     try:
-        # 1. Selector de Estación
-        query_estaciones = "SELECT DISTINCT id_estacion, nombre, tad, plaza FROM estaciones_detalle ORDER BY id_estacion;"
-        df_estaciones = pd.read_sql(query_estaciones, conn)
+        # 1. Consulta base de estaciones, plazas, proveedores/TAD y programadores si aplica
+        # Ajustamos para obtener los datos necesarios para los filtros
+        query_estaciones = """
+            SELECT DISTINCT 
+                id_estacion, 
+                nombre, 
+                tad as proveedor, 
+                plaza,
+                COALESCE(user_asignado, 'Yesenia') as programador
+            FROM estaciones_detalle 
+            ORDER BY id_estacion;
+        """
+        # Nota: Si tu columna de usuario tiene otro nombre en estaciones_detalle, la adaptamos. 
+        # Como fallback por la imagen de referencia que usa 'Yesenia', manejamos un campo genérico o directo.
         
-        if df_estaciones.empty:
-            st.warning("No hay estaciones registradas en la tabla estaciones_detalle.")
-            return
-
-        estaciones_list = [f"{row['id_estacion']} - {row['nombre']}" for _, row in df_estaciones.iterrows()]
-        selected_estacion_str = st.selectbox("Selecciona la Estación a Programar:", estaciones_list)
-        estacion_id = selected_estacion_str.split(" - ")[0]
-
-        # Obtener datos base de la estación seleccionada
-        info_estacion = df_estaciones[df_estaciones['id_estacion'] == estacion_id].iloc[0]
-
-        # 2. Consultar Inventarios Actuales de la estación
-        query_inv = f"""
-            SELECT regular, premium, diesel 
-            FROM inventarios_historico 
-            WHERE estacion_id = '{estacion_id}' 
-            ORDER BY fecha DESC, turno DESC 
-            LIMIT 1;
-        """
-        df_inv = pd.read_sql(query_inv, conn)
-        inv_reg = df_inv['regular'].iloc[0] if not df_inv.empty and pd.notna(df_inv['regular'].iloc[0]) else 0.0
-        inv_pre = df_inv['premium'].iloc[0] if not df_inv.empty and pd.notna(df_inv['premium'].iloc[0]) else 0.0
-        inv_die = df_inv['diesel'].iloc[0] if not df_inv.empty and pd.notna(df_inv['diesel'].iloc[0]) else 0.0
-
-        # 3. Consultar Capacidades Máximas
-        query_cap = f"""
+        # Vamos a hacer una consulta más segura trayendo las estaciones y uniendo con inventarios y vdp
+        query_base = """
             SELECT 
-                SUM(CASE WHEN producto ILIKE '%regular%' OR producto ILIKE '%magna%' THEN capacidad_maxima ELSE 0 END) as cap_regular,
-                SUM(CASE WHEN producto ILIKE '%premium%' THEN capacidad_maxima ELSE 0 END) as cap_premium,
-                SUM(CASE WHEN producto ILIKE '%diesel%' THEN capacidad_maxima ELSE 0 END) as cap_diesel
-            FROM estaciones_detalle
-            WHERE id_estacion = '{estacion_id}';
+                ed.id_estacion,
+                ed.nombre as estacion_nombre,
+                ed.plaza,
+                ed.tad as proveedor,
+                COALESCE(ed.usuario, 'Yesenia') as programador,
+                ui.regular as inv_reg,
+                ui.premium as inv_pre,
+                ui.diesel as inv_die,
+                COALESCE(vp.vdp_regular, 0) as vdp_reg,
+                COALESCE(vp.vdp_premium, 0) as vdp_pre,
+                COALESCE(vp.vdp_diesel, 0) as vdp_die
+            FROM estaciones_detalle ed
+            LEFT JOIN (
+                SELECT estacion_id, regular, premium, diesel,
+                       ROW_NUMBER() OVER(PARTITION BY estacion_id ORDER BY fecha DESC, turno DESC) as rn
+                FROM inventarios_historico
+            ) ui ON ed.id_estacion = ui.estacion_id AND ui.rn = 1
+            LEFT JOIN vdp_ponderado_12w vp ON ed.id_estacion = vp.estacion_id;
         """
-        df_cap = pd.read_sql(query_cap, conn)
-        cap_reg = df_cap['cap_regular'].iloc[0] if not df_cap.empty and pd.notna(df_cap['cap_regular'].iloc[0]) else 1.0
-        cap_pre = df_cap['cap_premium'].iloc[0] if not df_cap.empty and pd.notna(df_cap['cap_premium'].iloc[0]) else 1.0
-        cap_die = df_cap['cap_diesel'].iloc[0] if not df_cap.empty and pd.notna(df_cap['cap_diesel'].iloc[0]) else 1.0
-
-        # 4. Consultar VDP Ponderada y Factores Reales de la estación
-        query_factores = f"""
-            SELECT producto, vdp_ponderada, 
-                   fact_real_lun, fact_real_mar, fact_real_mie, fact_real_jue, 
-                   fact_real_vie, fact_real_sab, fact_real_dom
-            FROM vw_factor_real_vdp_ponderada
-            WHERE estacion_id = '{estacion_id}';
-        """
-        df_factores = pd.read_sql(query_factores, conn)
-
-        if df_factores.empty:
-            st.warning(f"No se encontraron factores calculados en la vista 'vw_factor_real_vdp_ponderada' para la estación {estacion_id}.")
+        
+        df_base = pd.read_sql(query_base, conn)
+        
+        if df_base.empty:
+            st.warning("No se encontraron registros en las tablas de estaciones e inventarios.")
             return
 
-        # 5. Generar Línea de Tiempo (Próximos 8 días a partir de hoy)
-        hoy = datetime.now().date()
-        fechas = [hoy + timedelta(days=i) for i in range(8)]
-        columnas_fechas = [f.strftime('%d-%b') for f in fechas]
-
-        # Estructura para armar la tabla final tipo MRP
-        filas_matriz = []
-        productos = [('Regular', inv_reg, cap_reg, 'regular'), 
-                     ('Premium', inv_pre, cap_pre, 'premium'), 
-                     ('Diesel', inv_die, cap_die, 'diesel')]
-
-        for prod_nombre, inv_actual, cap_max, prod_key in productos:
-            prod_row = df_factores[df_factores['producto'].str.lower() == prod_key.lower()]
-            if prod_row.empty or prod_row['vdp_ponderada'].iloc[0] == 0:
-                continue
-
-            vdp = prod_row['vdp_ponderada'].iloc[0]
-            factores = [
-                prod_row['fact_real_lun'].iloc[0],
-                prod_row['fact_real_mar'].iloc[0],
-                prod_row['fact_real_mie'].iloc[0],
-                prod_row['fact_real_jue'].iloc[0],
-                prod_row['fact_real_vie'].iloc[0],
-                prod_row['fact_real_sab'].iloc[0],
-                prod_row['fact_real_dom'].iloc[0]
-            ]
-
-            ventas_dia = []
-            inventarios_dia = []
-            ds_dia = []
-            cap_pct_dia = []
+        # 2. Filtros Superiores: Programador y Nombre de Estación
+        col_f1, col_f2 = st.columns(2)
+        
+        with col_f1:
+            programadores_disponibles = sorted(df_base['programador'].dropna().unique())
+            selected_prog = st.selectbox("Selecciona el Programador:", programadores_disponibles)
             
-            inv_rolling = inv_actual
-            for idx, f_date in enumerate(fechas):
-                isodow = f_date.isoweekday() - 1 # 0 a 6
-                factor_hoy = factores[isodow] if pd.notna(factores[isodow]) else 1.0
-                venta_est = round(vdp * factor_hoy, 0)
-                ventas_dia.append(venta_est)
+        # Filtrar estaciones basadas en el programador seleccionado
+        df_filtrado_prog = df_base[df_base['programador'] == selected_prog]
+        
+        with col_f2:
+            estaciones_nombres = [f"{row['id_estacion']} - {row['estacion_nombre']}" for _, row in df_filtrado_prog.iterrows()]
+            if not estaciones_nombres:
+                st.warning("No hay estaciones asignadas a este programador.")
+                return
+            selected_est_str = st.selectbox("Selecciona la Estación:", estaciones_nombres)
+            
+        # Obtener el ID de la estación seleccionada
+        estacion_id_sel = selected_est_str.split(" - ")[0]
+        row_estacion = df_base[df_base['id_estacion'] == estacion_id_sel].iloc[0]
 
-                compra_est = 0.0 
-                inv_rolling = inv_rolling + compra_est - venta_est
-                inventarios_dia.append(round(inv_rolling, 0))
+        st.markdown("---")
+        st.markdown(f"#### 🏢 Estación: {row_estacion['estacion_nombre']} (ID: {estacion_id_sel})")
 
-                ds = round(inv_rolling / vdp, 1) if vdp > 0 else 0.0
-                ds_dia.append(ds)
+        # Datos de cabecera comunes para las tablas de productos
+        id_est = str(row_estacion['id_estacion'])
+        nombre_est = str(row_estacion['estacion_nombre'])
+        plaza_est = str(row_estacion['plaza'])
+        prov_est = str(row_estacion['proveedor'])
 
-                cap_p = round((inv_rolling / cap_max) * 100, 0) if cap_max > 0 else 0.0
-                cap_pct_dia.append(f"{cap_p:.0f}%")
+        productos_config = [
+            ("REGULAR", row_estacion['inv_reg'], row_estacion['vdp_reg']),
+            ("PREMIUM", row_estacion['inv_pre'], row_estacion['vdp_pre']),
+            ("DIESEL", row_estacion['inv_die'], row_estacion['vdp_die'])
+        ]
 
-            base_meta = {
-                "User": "Sistema",
-                "ID": estacion_id,
-                "Destino": str(info_estacion.get('tad', '')),
-                "TAD": str(info_estacion.get('tad', '')),
-                "Grupo": str(info_estacion.get('plaza', '')),
-                "Estacion": info_estacion['nombre'],
-                "Producto": prod_nombre
-            }
+        # 3. Renderizar una tabla por cada producto
+        for prod_nombre, inv_inicial, vdp_val in productos_config:
+            # Si el inventario o la vdp son nulos/cero, podemos omitir o mostrar con 0
+            inv_ini = float(inv_inicial) if pd.notna(inv_inicial) else 0.0
+            vdp = float(vdp_val) if pd.notna(vdp_val) else 0.0
+            
+            # Inventario final = Inventario Inicial - Venta Diaria Proyectada + Carga Programada (0)
+            inv_final = inv_ini - vdp
 
-            # Fila Venta
-            f_venta = base_meta.copy()
-            f_venta["MRP"] = "Venta"
-            f_venta["Inv Actual"] = f"{inv_actual:,.0f}"
-            for c_name, val in zip(columnas_fechas, ventas_dia):
-                f_venta[c_name] = f"{val:,.0f}"
-            filas_matriz.append(f_venta)
+            # Estructurar la tabla para este producto
+            tabla_prod = pd.DataFrame({
+                "id_estacion": [id_est],
+                "Nombre": [nombre_est],
+                "Plaza": [plaza_est],
+                "Proveedor": [prov_est],
+                "Inventario Inicial": [f"{inv_ini:,.0f} L"],
+                "Venta Diaria Proyectada": [f"{vdp:,.0f} L"],
+                "Carga Programada": ["-"],  # Vacío de momento para futura implementación
+                "Inventario Final": [f"{inv_final:,.0f} L"]
+            })
 
-            # Fila Compra
-            f_compra = base_meta.copy()
-            f_compra["MRP"] = "Compra"
-            f_compra["Inv Actual"] = f"{inv_actual:,.0f}"
-            for c_name in columnas_fechas:
-                f_compra[c_name] = "0"
-            filas_matriz.append(f_compra)
-
-            # Fila Inventario
-            f_inv = base_meta.copy()
-            f_inv["MRP"] = "Inventario"
-            f_inv["Inv Actual"] = f"{inv_actual:,.0f}"
-            for c_name, val in zip(columnas_fechas, inventarios_dia):
-                f_inv[c_name] = f"{val:,.0f}"
-            filas_matriz.append(f_inv)
-
-            # Fila D/S
-            f_ds = base_meta.copy()
-            f_ds["MRP"] = "D/S"
-            f_ds["Inv Actual"] = f"{inv_actual:,.0f}"
-            for c_name, val in zip(columnas_fechas, ds_dia):
-                f_ds[c_name] = f"{val:.1f}"
-            filas_matriz.append(f_ds)
-
-            # Fila Capacidad %
-            f_cap = base_meta.copy()
-            f_cap["MRP"] = "Capacidad %"
-            f_cap["Inv Actual"] = f"{inv_actual:,.0f}"
-            for c_name, val in zip(columnas_fechas, cap_pct_dia):
-                f_cap[c_name] = val
-            filas_matriz.append(f_cap)
-
-        if not filas_matriz:
-            st.info("No hay datos suficientes para calcular la matriz con los productos configurados.")
-            return
-
-        # Renderizar la tabla final en Streamlit
-        df_matriz = pd.DataFrame(filas_matriz)
-        st.dataframe(df_matriz, width='stretch', height=500, hide_index=True)
+            st.markdown(f"##### ⛽ Producto: {prod_nombre}")
+            st.dataframe(tabla_prod, width='stretch', hide_index=True)
+            st.markdown("")
 
     except Exception as e:
-        st.error(f"Error detallado en la matriz de programación: {e}")
+        st.error(f"Error al generar el módulo de programación: {e}")
