@@ -41,62 +41,27 @@ def render(conn):
             st.warning("No hay datos suficientes para generar el resumen.")
             return
 
-        # Calcular los días de suministro numéricos exactos permitiendo nulos limpios (np.nan)
+        # Calcular los días de suministro numéricos exactos
         df['ds_r'] = df.apply(lambda r: round(r['reg_litros'] / r['vdp_reg'], 1) if r['vdp_reg'] > 0 else np.nan, axis=1)
         df['ds_p'] = df.apply(lambda r: round(r['pre_litros'] / r['vdp_pre'], 1) if r['vdp_pre'] > 0 else np.nan, axis=1)
         df['ds_d'] = df.apply(lambda r: round(r['die_litros'] / r['vdp_die'], 1) if r['vdp_die'] > 0 else np.nan, axis=1)
 
-        # Construcción de la tabla base sin la columna de proveedor
+        # Construcción directa de la tabla visual con texto formateado para evitar errores de tipo en Streamlit
         tabla_vis = pd.DataFrame({
             "ID": df['id_estacion'].astype(str),
             "TAD": df['tad'].astype(str),
             "Plaza": df['plaza'].astype(str),
-            "Estacion": df['estacion'].astype(str),
+            "Estación": df['estacion'].astype(str),
             "Regular": df['reg_litros'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-"),
             "Premium": df['pre_litros'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-"),
             "Diesel": df['die_litros'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-"),
-            "D/S R": df['ds_r'],
-            "D/S P": df['ds_p'],
-            "D/S D": df['ds_d'],
+            "D/S R": df['ds_r'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-"),
+            "D/S P": df['ds_p'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-"),
+            "D/S D": df['ds_d'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-"),
         })
 
-        # Función de estilo para pintar celdas según el semáforo operativo
-        def aplicar_semaforo(row_idx):
-            estilos = [''] * len(tabla_vis.columns)
-            r = df.iloc[row_idx]
-            
-            mapeo = [
-                ('Regular', 'D/S R', r['ds_r']),
-                ('Premium', 'D/S P', r['ds_p']),
-                ('Diesel', 'D/S D', r['ds_d'])
-            ]
-            
-            for col_litro, col_ds, ds_val in mapeo:
-                if pd.notna(ds_val):
-                    if ds_val < 1.0:
-                        color = 'background-color: #ffcccc; color: #990000; font-weight: bold;' # Rojo crítico
-                    elif ds_val < 2.0:
-                        color = 'background-color: #fff2cc; color: #b26b00; font-weight: bold;' # Amarillo advertencia
-                    else:
-                        continue
-                    
-                    if col_litro in tabla_vis.columns:
-                        estilos[tabla_vis.columns.get_loc(col_litro)] = color
-                    if col_ds in tabla_vis.columns:
-                        estilos[tabla_vis.columns.get_loc(col_ds)] = color
-            return estilos
-
-        # Aplicar formato de un decimal y reemplazar nulos con guion de forma segura
-        tabla_estilizada = tabla_vis.style.apply(aplicar_semaforo, axis=1).format(
-            {
-                "D/S R": lambda x: f"{x:.1f}" if pd.notna(x) else "-",
-                "D/S P": lambda x: f"{x:.1f}" if pd.notna(x) else "-",
-                "D/S D": lambda x: f"{x:.1f}" if pd.notna(x) else "-"
-            }
-        )
-
-        # Mostrar tabla principal en Streamlit
-        st.dataframe(tabla_estilizada, width='stretch', height=450, hide_index=True)
+        # Mostrar tabla principal sin estilos complejos
+        st.dataframe(tabla_vis, width='stretch', height=450, hide_index=True)
 
         # ==========================================
         # CENTRO DE ALERTAS PRIORIZADAS
