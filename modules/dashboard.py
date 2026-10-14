@@ -79,9 +79,9 @@ def render(conn):
             "Estación": df['estacion'].astype(str),
             
             # Inventarios actuales / Espacio al 90%
-            "Reg (Inv / Esp 90%)": df.apply(lambda r: f"{r['reg_litros']:,.0f} L (Faltan {r['espacio_r']:,.0f} L)" if r['cap_regular'] > 0 else "-", axis=1),
-            "Pre (Inv / Esp 90%)": df.apply(lambda r: f"{r['pre_litros']:,.0f} L (Faltan {r['espacio_p']:,.0f} L)" if r['cap_premium'] > 0 else "-", axis=1),
-            "Die (Inv / Esp 90%)": df.apply(lambda r: f"{r['die_litros']:,.0f} L (Faltan {r['espacio_d']:,.0f} L)" if r['cap_diesel'] > 0 else "-", axis=1),
+            "Reg (Inv / Cap.Max)": df.apply(lambda r: f"{r['reg_litros']:,.0f} L (Faltan {r['espacio_r']:,.0f} L)" if r['cap_regular'] > 0 else "-", axis=1),
+            "Pre (Inv / Cap.Max)": df.apply(lambda r: f"{r['pre_litros']:,.0f} L (Faltan {r['espacio_p']:,.0f} L)" if r['cap_premium'] > 0 else "-", axis=1),
+            "Die (Inv / Cap.Max)": df.apply(lambda r: f"{r['die_litros']:,.0f} L (Faltan {r['espacio_d']:,.0f} L)" if r['cap_diesel'] > 0 else "-", axis=1),
             
             # Días de Suministro
             "D/S R": df['ds_r'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-"),
