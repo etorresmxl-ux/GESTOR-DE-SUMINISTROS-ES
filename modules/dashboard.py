@@ -149,7 +149,7 @@ def render(conn):
 
         df['semaforo'] = df.apply(calcular_semaforo, axis=1)
 
-        # Construcción de la tabla visual integrando inventario, espacio disponible al 90% y D/S
+        # Construcción de la tabla visual integrando inventario, espacio disponible al 90% y D/S (con N/A si no aplica)
         tabla_vis = pd.DataFrame({
             "Semáforo": df['semaforo'],
             "ID": df['id_estacion'].astype(str),
@@ -158,14 +158,14 @@ def render(conn):
             "Estación": df['estacion'].astype(str),
             
             # Inventarios actuales / Espacio al 90%
-            "Reg (Inv / Cap.Max)": df.apply(lambda r: f"{r['reg_litros']:,.0f} L (Faltan {r['espacio_r']:,.0f} L)" if r['cap_regular'] > 0 else "-", axis=1),
-            "Pre (Inv / Cap.Max)": df.apply(lambda r: f"{r['pre_litros']:,.0f} L (Faltan {r['espacio_p']:,.0f} L)" if r['cap_premium'] > 0 else "-", axis=1),
-            "Die (Inv / Cap.Max)": df.apply(lambda r: f"{r['die_litros']:,.0f} L (Faltan {r['espacio_d']:,.0f} L)" if r['cap_diesel'] > 0 else "-", axis=1),
+            "Reg (Inv / Cap.Max)": df.apply(lambda r: f"{r['reg_litros']:,.0f} L (Faltan {r['espacio_r']:,.0f} L)" if r['cap_regular'] > 0 else "N/A", axis=1),
+            "Pre (Inv / Cap.Max)": df.apply(lambda r: f"{r['pre_litros']:,.0f} L (Faltan {r['espacio_p']:,.0f} L)" if r['cap_premium'] > 0 else "N/A", axis=1),
+            "Die (Inv / Cap.Max)": df.apply(lambda r: f"{r['die_litros']:,.0f} L (Faltan {r['espacio_d']:,.0f} L)" if r['cap_diesel'] > 0 else "N/A", axis=1),
             
             # Días de Suministro
-            "D/S R": df['ds_r'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-"),
-            "D/S P": df['ds_p'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-"),
-            "D/S D": df['ds_d'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-"),
+            "D/S R": df.apply(lambda r: f"{r['ds_r']:.1f}" if r['cap_regular'] > 0 and pd.notna(r['ds_r']) else "N/A", axis=1),
+            "D/S P": df.apply(lambda r: f"{r['ds_p']:.1f}" if r['cap_premium'] > 0 and pd.notna(r['ds_p']) else "N/A", axis=1),
+            "D/S D": df.apply(lambda r: f"{r['ds_d']:.1f}" if r['cap_diesel'] > 0 and pd.notna(r['ds_d']) else "N/A", axis=1),
         })
 
         st.dataframe(tabla_vis, width='stretch', height=450, hide_index=True)
