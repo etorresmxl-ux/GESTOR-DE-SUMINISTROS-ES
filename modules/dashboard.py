@@ -71,30 +71,9 @@ def render(conn):
         df['espacio_p'] = df.apply(lambda r: max(0, (r['cap_premium'] * 0.90) - r['pre_litros']) if r['cap_premium'] > 0 else np.nan, axis=1)
         df['espacio_d'] = df.apply(lambda r: max(0, (r['cap_diesel'] * 0.90) - r['die_litros']) if r['cap_diesel'] > 0 else np.nan, axis=1)
 
-        # Construcción de la tabla visual integrando inventario, espacio disponible al 90% y D/S
-        tabla_vis = pd.DataFrame({
-            "ID": df['id_estacion'].astype(str),
-            "TAD": df['tad'].astype(str),
-            "Plaza": df['plaza'].astype(str),
-            "Estación": df['estacion'].astype(str),
-            
-            # Inventarios actuales / Espacio al 90%
-            "Reg (Inv / Cap.Max)": df.apply(lambda r: f"{r['reg_litros']:,.0f} L (Faltan {r['espacio_r']:,.0f} L)" if r['cap_regular'] > 0 else "-", axis=1),
-            "Pre (Inv / Cap.Max)": df.apply(lambda r: f"{r['pre_litros']:,.0f} L (Faltan {r['espacio_p']:,.0f} L)" if r['cap_premium'] > 0 else "-", axis=1),
-            "Die (Inv / Cap.Max)": df.apply(lambda r: f"{r['die_litros']:,.0f} L (Faltan {r['espacio_d']:,.0f} L)" if r['cap_diesel'] > 0 else "-", axis=1),
-            
-            # Días de Suministro
-            "D/S R": df['ds_r'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-"),
-            "D/S P": df['ds_p'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-"),
-            "D/S D": df['ds_d'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-"),
-        })
-
-        st.dataframe(tabla_vis, width='stretch', height=450, hide_index=True)
-
         # ==========================================
-        # CENTRO DE ALERTAS PRIORIZADAS
+        # 1. CENTRO DE ALERTAS PRIORIZADAS (PRIMERO)
         # ==========================================
-        st.markdown("---")
         st.markdown("### 🚨 Centro de Alertas y Prioridades de Abastecimiento")
         
         alertas = []
@@ -147,6 +126,49 @@ def render(conn):
             })
             
             st.dataframe(tabla_alertas_vis, width='stretch', height=300, hide_index=True)
+
+        st.markdown("---")
+
+        # ==========================================
+        # 2. TABLA GENERAL DE INVENTARIOS CON SEMÁFORO
+        # ==========================================
+        st.markdown("### 📋 Detalle General de Inventarios y Suministro")
+
+        def calcular_semaforo(r):
+            ds_vals = [r['ds_r'], r['ds_p'], r['ds_d']]
+            ds_validos = [v for v in ds_vals if pd.notna(v)]
+            if not ds_validos:
+                return "🟢"
+            min_ds = min(ds_validos)
+            if min_ds < 1.0:
+                return "🔴"
+            elif min_ds < 2.0:
+                return "🟡"
+            else:
+                return "🟢"
+
+        df['semaforo'] = df.apply(calcular_semaforo, axis=1)
+
+        # Construcción de la tabla visual integrando inventario, espacio disponible al 90% y D/S
+        tabla_vis = pd.DataFrame({
+            "Semáforo": df['semaforo'],
+            "ID": df['id_estacion'].astype(str),
+            "TAD": df['tad'].astype(str),
+            "Plaza": df['plaza'].astype(str),
+            "Estación": df['estacion'].astype(str),
+            
+            # Inventarios actuales / Espacio al 90%
+            "Reg (Inv / Cap.Max)": df.apply(lambda r: f"{r['reg_litros']:,.0f} L (Faltan {r['espacio_r']:,.0f} L)" if r['cap_regular'] > 0 else "-", axis=1),
+            "Pre (Inv / Cap.Max)": df.apply(lambda r: f"{r['pre_litros']:,.0f} L (Faltan {r['espacio_p']:,.0f} L)" if r['cap_premium'] > 0 else "-", axis=1),
+            "Die (Inv / Cap.Max)": df.apply(lambda r: f"{r['die_litros']:,.0f} L (Faltan {r['espacio_d']:,.0f} L)" if r['cap_diesel'] > 0 else "-", axis=1),
+            
+            # Días de Suministro
+            "D/S R": df['ds_r'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-"),
+            "D/S P": df['ds_p'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-"),
+            "D/S D": df['ds_d'].apply(lambda x: f"{x:.1f}" if pd.notna(x) else "-"),
+        })
+
+        st.dataframe(tabla_vis, width='stretch', height=450, hide_index=True)
         
     except Exception as e:
         st.error(f"Error al generar el dashboard operativo: {e}")
