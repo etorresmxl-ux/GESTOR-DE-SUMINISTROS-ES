@@ -15,27 +15,43 @@ def render(conn):
                 diesel,
                 ROW_NUMBER() OVER(PARTITION BY estacion_id ORDER BY fecha DESC, turno DESC) as rn
             FROM inventarios_historico
+        ),
+        capacidades_productos AS (
+            SELECT 
+                id_estacion,
+                SUM(CASE WHEN producto ILIKE '%regular%' OR producto ILIKE '%magna%' THEN capacidad_máxima ELSE 0 END) as cap_regular,
+                SUM(CASE WHEN producto ILIKE '%premium%' THEN capacidad_máxima ELSE 0 END) as cap_premium,
+                SUM(CASE WHEN producto ILIKE '%diesel%' THEN capacidad_máxima ELSE 0 END) as cap_diesel
+            FROM estaciones_detalle
+            GROUP BY id_estacion
+        ),
+        info_base AS (
+            SELECT DISTINCT 
+                id_estacion,
+                tad,
+                plaza,
+                nombre as estacion
+            FROM estaciones_detalle
         )
         SELECT 
-            e.id_estacion,
-            e.tad,
-            e.plaza,
-            e.nombre as estacion,
-            e.cap_regular,
-            e.cap_premium,
-            e.cap_diesel,
+            ib.id_estacion,
+            ib.tad,
+            ib.plaza,
+            ib.estacion,
+            COALESCE(cp.cap_regular, 0) as cap_regular,
+            COALESCE(cp.cap_premium, 0) as cap_premium,
+            COALESCE(cp.cap_diesel, 0) as cap_diesel,
             COALESCE(ui.regular, 0) as reg_litros,
             COALESCE(ui.premium, 0) as pre_litros,
             COALESCE(ui.diesel, 0) as die_litros,
             COALESCE(vp.vdp_regular, 0) as vdp_reg,
             COALESCE(vp.vdp_premium, 0) as vdp_pre,
             COALESCE(vp.vdp_diesel, 0) as vdp_die
-        FROM estaciones_detalle e
-        LEFT JOIN ultimo_inventario ui ON e.id_estacion = ui.estacion_id AND ui.rn = 1
-        LEFT JOIN vdp_ponderado_12w vp ON e.id_estacion = vp.estacion_id
-        GROUP BY e.id_estacion, e.tad, e.plaza, e.nombre, e.cap_regular, e.cap_premium, e.cap_diesel, 
-                 ui.regular, ui.premium, ui.diesel, vp.vdp_regular, vp.vdp_premium, vp.vdp_diesel
-        ORDER BY e.id_estacion;
+        FROM info_base ib
+        LEFT JOIN ultimo_inventario ui ON ib.id_estacion = ui.estacion_id AND ui.rn = 1
+        LEFT JOIN capacidades_productos cp ON ib.id_estacion = cp.id_estacion
+        LEFT JOIN vdp_ponderado_12w vp ON ib.id_estacion = vp.estacion_id
+        ORDER BY ib.id_estacion;
     """
     
     try:
@@ -51,7 +67,6 @@ def render(conn):
         df['ds_d'] = df.apply(lambda r: round(r['die_litros'] / r['vdp_die'], 1) if r['cap_diesel'] > 0 and r['vdp_die'] > 0 else np.nan, axis=1)
 
         # Calcular espacio disponible para recibir producto al 90% de su capacidad máxima
-        # (Capacidad Total * 0.90) - Inventario Actual
         df['espacio_r'] = df.apply(lambda r: max(0, (r['cap_regular'] * 0.90) - r['reg_litros']) if r['cap_regular'] > 0 else np.nan, axis=1)
         df['espacio_p'] = df.apply(lambda r: max(0, (r['cap_premium'] * 0.90) - r['pre_litros']) if r['cap_premium'] > 0 else np.nan, axis=1)
         df['espacio_d'] = df.apply(lambda r: max(0, (r['cap_diesel'] * 0.90) - r['die_litros']) if r['cap_diesel'] > 0 else np.nan, axis=1)
