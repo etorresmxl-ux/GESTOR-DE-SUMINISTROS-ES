@@ -163,9 +163,9 @@ def render(conn):
             "Die (Inv / Cap.Max)": df.apply(lambda r: f"{r['die_litros']:,.0f} L / {r['cap_diesel']:,.0f} L" if r['cap_diesel'] > 0 else "N/A", axis=1),
             
             # Días de Suministro y VDP
-            "D/S R (VDP)": df.apply(lambda r: f"{r['ds_r']:.1f} días ({r['vdp_reg']:,.0f} L)" if r['cap_regular'] > 0 and pd.notna(r['ds_r']) else "N/A", axis=1),
-            "D/S P (VDP)": df.apply(lambda r: f"{r['ds_p']:.1f} días ({r['vdp_pre']:,.0f} L)" if r['cap_premium'] > 0 and pd.notna(r['ds_p']) else "N/A", axis=1),
-            "D/S D (VDP)": df.apply(lambda r: f"{r['ds_d']:.1f} días ({r['vdp_die']:,.0f} L)" if r['cap_diesel'] > 0 and pd.notna(r['ds_d']) else "N/A", axis=1),
+            "Reg D/S (VDP)": df.apply(lambda r: f"{r['ds_r']:.1f} días ({r['vdp_reg']:,.0f} L)" if r['cap_regular'] > 0 and pd.notna(r['ds_r']) else "N/A", axis=1),
+            "Pre D/S (VDP)": df.apply(lambda r: f"{r['ds_p']:.1f} días ({r['vdp_pre']:,.0f} L)" if r['cap_premium'] > 0 and pd.notna(r['ds_p']) else "N/A", axis=1),
+            "Die D/S (VDP)": df.apply(lambda r: f"{r['ds_d']:.1f} días ({r['vdp_die']:,.0f} L)" if r['cap_diesel'] > 0 and pd.notna(r['ds_d']) else "N/A", axis=1),
         })
 
         st.dataframe(tabla_vis, width='stretch', height=450, hide_index=True)
