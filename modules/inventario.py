@@ -5,12 +5,9 @@ from datetime import date
 def render(conn):
     st.markdown("### 📝 Captura Masiva de Inventarios")
     
-    # CSS personalizado para:
-    # 1. Colores intercalados (efecto cebra) en el data_editor.
-    # 2. Reducir la altura/espacio entre filas (padding vertical compacto).
+    # CSS personalizado para compactar filas y aplicar diseño cebra
     st.markdown("""
         <style>
-        /* Compactar altura de filas en el editor de datos */
         div[data-testid="stDataEditor"] tr {
             height: 32px !important;
         }
@@ -18,7 +15,6 @@ def render(conn):
             padding-top: 2px !important;
             padding-bottom: 2px !important;
         }
-        /* Filas cebra intercaladas */
         div[data-testid="stDataEditor"] tbody tr:nth-child(odd) {
             background-color: #1a1a1a !important;
         }
@@ -77,22 +73,27 @@ def render(conn):
         """
         df_existentes = pd.read_sql(query_exist, conn)
 
-        # Preparar columnas de litros como enteros
+        # Preparar columnas de litros inicializadas en 0
         df_estaciones["Regular"] = 0
         df_estaciones["Premium"] = 0
         df_estaciones["Diesel"] = 0
 
+        # Precargar valores existentes de forma segura
         if not df_existentes.empty:
             for idx, row in df_estaciones.iterrows():
                 match = df_existentes[df_existentes["estacion_id"] == row["ID"]]
                 if not match.empty:
-                    df_estaciones.loc[idx, "Regular"] = int(match.iloc[0]["regular"])
-                    df_estaciones.loc[idx, "Premium"] = int(match.iloc[0]["premium"])
-                    df_estaciones.loc[idx, "Diesel"] = int(match.iloc[0]["diesel"])
+                    reg_val = match.iloc[0]["regular"]
+                    pre_val = match.iloc[0]["premium"]
+                    die_val = match.iloc[0]["diesel"]
+                    
+                    df_estaciones.loc[idx, "Regular"] = int(reg_val) if pd.notna(reg_val) else 0
+                    df_estaciones.loc[idx, "Premium"] = int(pre_val) if pd.notna(pre_val) else 0
+                    df_estaciones.loc[idx, "Diesel"] = int(die_val) if pd.notna(die_val) else 0
 
         st.caption(f"Mostrando **{len(df_estaciones)} estaciones** asignadas a **{usuario_seleccionado}** (Turno: **{turno_seleccionado}**, Fecha: **{fecha_registro}**).")
 
-        # 4. Tabla interactiva con formato numérico de miles (",") y enteros
+        # 4. Tabla interactiva
         with st.form("form_captura_masiva"):
             df_editado = st.data_editor(
                 df_estaciones,
@@ -106,12 +107,12 @@ def render(conn):
                     "Diesel": st.column_config.NumberColumn("Diesel (Lts)", min_value=0, format="%,d", step=100),
                 },
                 hide_index=True,
-                use_container_width=True,
+                width='stretch',
                 num_rows="fixed",
                 height=550
             )
             
-            submitted = st.form_submit_button("💾 Guardar / Actualizar Inventarios", use_container_width=True)
+            submitted = st.form_submit_button("💾 Guardar / Actualizar Inventarios", width='stretch')
             
             if submitted:
                 try:
