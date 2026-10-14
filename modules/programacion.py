@@ -11,59 +11,34 @@ def render(conn):
         return
 
     try:
-        # 1. Consulta base de estaciones, plazas, proveedores/TAD y programadores si aplica
-        # Ajustamos para obtener los datos necesarios para los filtros
-        query_estaciones = """
-            SELECT DISTINCT 
-                id_estacion, 
-                nombre, 
-                tad as proveedor, 
-                plaza,
-                COALESCE(user_asignado, 'Yesenia') as programador
-            FROM estaciones_detalle 
-            ORDER BY id_estacion;
-        """
-        # Nota: Si tu columna de usuario tiene otro nombre en estaciones_detalle, la adaptamos. 
-        # Como fallback por la imagen de referencia que usa 'Yesenia', manejamos un campo genérico o directo.
-        
-        # Vamos a hacer una consulta más segura trayendo las estaciones y uniendo con inventarios y vdp
+        # 1. Consultar la relación de estaciones y programadores haciendo join con estaciones_detalle
         query_base = """
             SELECT 
-                ed.id_estacion,
-                ed.nombre as estacion_nombre,
-                ed.plaza,
-                ed.tad as proveedor,
-                COALESCE(ed.usuario, 'Yesenia') as programador,
-                ui.regular as inv_reg,
-                ui.premium as inv_pre,
-                ui.diesel as inv_die,
-                COALESCE(vp.vdp_regular, 0) as vdp_reg,
-                COALESCE(vp.vdp_premium, 0) as vdp_pre,
-                COALESCE(vp.vdp_diesel, 0) as vdp_die
-            FROM estaciones_detalle ed
-            LEFT JOIN (
-                SELECT estacion_id, regular, premium, diesel,
-                       ROW_NUMBER() OVER(PARTITION BY estacion_id ORDER BY fecha DESC, turno DESC) as rn
-                FROM inventarios_historico
-            ) ui ON ed.id_estacion = ui.estacion_id AND ui.rn = 1
-            LEFT JOIN vdp_ponderado_12w vp ON ed.id_estacion = vp.estacion_id;
+                e.id AS id_estacion, 
+                e.usuario AS programador,
+                ed.nombre AS estacion_nombre, 
+                ed.tad AS proveedor, 
+                ed.plaza
+            FROM estaciones e
+            JOIN estaciones_detalle ed ON e.id = ed.id_estacion
+            WHERE e.usuario IS NOT NULL
+            ORDER BY e.usuario, e.id;
         """
+        df_estaciones = pd.read_sql(query_base, conn)
         
-        df_base = pd.read_sql(query_base, conn)
-        
-        if df_base.empty:
-            st.warning("No se encontraron registros en las tablas de estaciones e inventarios.")
+        if df_estaciones.empty:
+            st.warning("No se encontraron registros en la relación de estaciones y programadores.")
             return
 
         # 2. Filtros Superiores: Programador y Nombre de Estación
         col_f1, col_f2 = st.columns(2)
         
         with col_f1:
-            programadores_disponibles = sorted(df_base['programador'].dropna().unique())
+            programadores_disponibles = sorted(df_estaciones['programador'].dropna().unique())
             selected_prog = st.selectbox("Selecciona el Programador:", programadores_disponibles)
             
         # Filtrar estaciones basadas en el programador seleccionado
-        df_filtrado_prog = df_base[df_base['programador'] == selected_prog]
+        df_filtrado_prog = df_estaciones[df_estaciones['programador'] == selected_prog]
         
         with col_f2:
             estaciones_nombres = [f"{row['id_estacion']} - {row['estacion_nombre']}" for _, row in df_filtrado_prog.iterrows()]
@@ -74,33 +49,61 @@ def render(conn):
             
         # Obtener el ID de la estación seleccionada
         estacion_id_sel = selected_est_str.split(" - ")[0]
-        row_estacion = df_base[df_base['id_estacion'] == estacion_id_sel].iloc[0]
+        row_estacion = df_estaciones[df_estaciones['id_estacion'] == estacion_id_sel].iloc[0]
+
+        # 3. Consultar Inventarios Actuales de la estación (Inventario Inicial de hoy)
+        query_inv = f"""
+            SELECT regular, premium, diesel 
+            FROM inventarios_historico 
+            WHERE estacion_id = '{estacion_id_sel}' 
+            ORDER BY fecha DESC, turno DESC 
+            LIMIT 1;
+        """
+        df_inv = pd.read_sql(query_inv, conn)
+        inv_reg = df_inv['regular'].iloc[0] if not df_inv.empty and pd.notna(df_inv['regular'].iloc[0]) else 0.0
+        inv_pre = df_inv['premium'].iloc[0] if not df_inv.empty and pd.notna(df_inv['premium'].iloc[0]) else 0.0
+        inv_die = df_inv['diesel'].iloc[0] if not df_inv.empty and pd.notna(df_inv['diesel'].iloc[0]) else 0.0
+
+        # 4. Consultar VDP Ponderada de la estación
+        query_vdp = f"""
+            SELECT producto, vdp_ponderada 
+            FROM vw_factor_real_vdp_ponderada 
+            WHERE estacion_id = '{estacion_id_sel}';
+        """
+        df_vdp = pd.read_sql(query_vdp, conn)
+        
+        vdp_reg, vdp_pre, vdp_die = 0.0, 0.0, 0.0
+        if not df_vdp.empty:
+            for _, r in df_vdp.iterrows():
+                p_name = str(r['producto']).lower()
+                val = r['vdp_ponderada'] if pd.notna(r['vdp_ponderada']) else 0.0
+                if 'regular' in p_name or 'magna' in p_name:
+                    vdp_reg = val
+                elif 'premium' in p_name:
+                    vdp_pre = val
+                elif 'diesel' in p_name:
+                    vdp_die = val
 
         st.markdown("---")
         st.markdown(f"#### 🏢 Estación: {row_estacion['estacion_nombre']} (ID: {estacion_id_sel})")
 
-        # Datos de cabecera comunes para las tablas de productos
         id_est = str(row_estacion['id_estacion'])
         nombre_est = str(row_estacion['estacion_nombre'])
         plaza_est = str(row_estacion['plaza'])
         prov_est = str(row_estacion['proveedor'])
 
         productos_config = [
-            ("REGULAR", row_estacion['inv_reg'], row_estacion['vdp_reg']),
-            ("PREMIUM", row_estacion['inv_pre'], row_estacion['vdp_pre']),
-            ("DIESEL", row_estacion['inv_die'], row_estacion['vdp_die'])
+            ("REGULAR", inv_reg, vdp_reg),
+            ("PREMIUM", inv_pre, vdp_pre),
+            ("DIESEL", inv_die, vdp_die)
         ]
 
-        # 3. Renderizar una tabla por cada producto
+        # 5. Renderizar una tabla independiente por cada producto
         for prod_nombre, inv_inicial, vdp_val in productos_config:
-            # Si el inventario o la vdp son nulos/cero, podemos omitir o mostrar con 0
-            inv_ini = float(inv_inicial) if pd.notna(inv_inicial) else 0.0
-            vdp = float(vdp_val) if pd.notna(vdp_val) else 0.0
-            
-            # Inventario final = Inventario Inicial - Venta Diaria Proyectada + Carga Programada (0)
-            inv_final = inv_ini - vdp
+            inv_ini = float(inv_inicial)
+            vdp = float(vdp_val)
+            inv_final = inv_ini - vdp  # Inventario Final = Inv Inicial - Venta Proyectada + Carga (0)
 
-            # Estructurar la tabla para este producto
             tabla_prod = pd.DataFrame({
                 "id_estacion": [id_est],
                 "Nombre": [nombre_est],
@@ -108,7 +111,7 @@ def render(conn):
                 "Proveedor": [prov_est],
                 "Inventario Inicial": [f"{inv_ini:,.0f} L"],
                 "Venta Diaria Proyectada": [f"{vdp:,.0f} L"],
-                "Carga Programada": ["-"],  # Vacío de momento para futura implementación
+                "Carga Programada": ["-"],  # Espacio reservado para futura implementación
                 "Inventario Final": [f"{inv_final:,.0f} L"]
             })
 
