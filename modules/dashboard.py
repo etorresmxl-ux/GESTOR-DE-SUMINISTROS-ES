@@ -18,7 +18,6 @@ def render(conn):
         )
         SELECT 
             e.id_estacion,
-            e.proveedor,
             e.tad,
             e.plaza,
             e.nombre as estacion,
@@ -31,7 +30,7 @@ def render(conn):
         FROM estaciones_detalle e
         LEFT JOIN ultimo_inventario ui ON e.id_estacion = ui.estacion_id AND ui.rn = 1
         LEFT JOIN vdp_ponderado_12w vp ON e.id_estacion = vp.estacion_id
-        GROUP BY e.id_estacion, e.proveedor, e.tad, e.plaza, e.nombre, ui.regular, ui.premium, ui.diesel, vp.vdp_regular, vp.vdp_premium, vp.vdp_diesel
+        GROUP BY e.id_estacion, e.tad, e.plaza, e.nombre, ui.regular, ui.premium, ui.diesel, vp.vdp_regular, vp.vdp_premium, vp.vdp_diesel
         ORDER BY e.id_estacion;
     """
     
@@ -42,14 +41,13 @@ def render(conn):
             st.warning("No hay datos suficientes para generar el resumen.")
             return
 
-        # Calcular los días de suministro numéricos exactos (con decimales)
+        # Calcular los días de suministro numéricos exactos permitiendo nulos limpios (np.nan)
         df['ds_r'] = df.apply(lambda r: round(r['reg_litros'] / r['vdp_reg'], 1) if r['vdp_reg'] > 0 else np.nan, axis=1)
         df['ds_p'] = df.apply(lambda r: round(r['pre_litros'] / r['vdp_pre'], 1) if r['vdp_pre'] > 0 else np.nan, axis=1)
         df['ds_d'] = df.apply(lambda r: round(r['die_litros'] / r['vdp_die'], 1) if r['vdp_die'] > 0 else np.nan, axis=1)
 
-        # Construcción de la tabla base conservando floats nativos para las columnas D/S
+        # Construcción de la tabla base sin la columna de proveedor
         tabla_vis = pd.DataFrame({
-            "Proveedor": df['proveedor'].astype(str),
             "ID": df['id_estacion'].astype(str),
             "TAD": df['tad'].astype(str),
             "Plaza": df['plaza'].astype(str),
@@ -88,14 +86,13 @@ def render(conn):
                         estilos[tabla_vis.columns.get_loc(col_ds)] = color
             return estilos
 
-        # Aplicar formato de un decimal de forma segura con Styler format
+        # Aplicar formato de un decimal y reemplazar nulos con guion de forma segura
         tabla_estilizada = tabla_vis.style.apply(aplicar_semaforo, axis=1).format(
             {
-                "D/S R": "{:.1f}",
-                "D/S P": "{:.1f}",
-                "D/S D": "{:.1f}"
-            }, 
-            na_rep="-"
+                "D/S R": lambda x: f"{x:.1f}" if pd.notna(x) else "-",
+                "D/S P": lambda x: f"{x:.1f}" if pd.notna(x) else "-",
+                "D/S D": lambda x: f"{x:.1f}" if pd.notna(x) else "-"
+            }
         )
 
         # Mostrar tabla principal en Streamlit
