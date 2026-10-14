@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 
 def render(conn):
     st.markdown("### 📊 Dashboard Operativo - Inventarios y Días de Suministro (D/S)")
@@ -41,12 +42,12 @@ def render(conn):
             st.warning("No hay datos suficientes para generar el resumen.")
             return
 
-        # Calcular los días de suministro numéricos de forma segura
-        df['ds_r'] = df.apply(lambda r: round(r['reg_litros'] / r['vdp_reg'], 1) if r['vdp_reg'] > 0 else None, axis=1)
-        df['ds_p'] = df.apply(lambda r: round(r['pre_litros'] / r['vdp_pre'], 1) if r['vdp_pre'] > 0 else None, axis=1)
-        df['ds_d'] = df.apply(lambda r: round(r['die_litros'] / r['vdp_die'], 1) if r['vdp_die'] > 0 else None, axis=1)
+        # Calcular los días de suministro numéricos exactos (con decimales)
+        df['ds_r'] = df.apply(lambda r: round(r['reg_litros'] / r['vdp_reg'], 1) if r['vdp_reg'] > 0 else np.nan, axis=1)
+        df['ds_p'] = df.apply(lambda r: round(r['pre_litros'] / r['vdp_pre'], 1) if r['vdp_pre'] > 0 else np.nan, axis=1)
+        df['ds_d'] = df.apply(lambda r: round(r['die_litros'] / r['vdp_die'], 1) if r['vdp_die'] > 0 else np.nan, axis=1)
 
-        # Construcción de la tabla base con tipos estrictamente limpios
+        # Construcción de la tabla base conservando floats nativos para las columnas D/S
         tabla_vis = pd.DataFrame({
             "Proveedor": df['proveedor'].astype(str),
             "ID": df['id_estacion'].astype(str),
@@ -87,7 +88,15 @@ def render(conn):
                         estilos[tabla_vis.columns.get_loc(col_ds)] = color
             return estilos
 
-        tabla_estilizada = tabla_vis.style.apply(aplicar_semaforo, axis=1)
+        # Aplicar formato de un decimal de forma segura con Styler format
+        tabla_estilizada = tabla_vis.style.apply(aplicar_semaforo, axis=1).format(
+            {
+                "D/S R": "{:.1f}",
+                "D/S P": "{:.1f}",
+                "D/S D": "{:.1f}"
+            }, 
+            na_rep="-"
+        )
 
         # Mostrar tabla principal en Streamlit
         st.dataframe(tabla_estilizada, width='stretch', height=450, hide_index=True)
