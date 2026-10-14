@@ -7,15 +7,20 @@ def render(conn):
     st.markdown("### 🚛 Módulo de Programación y Proyección de Inventarios (MRP)")
     st.write("Matriz de proyección operativa: Venta estimada, Compras, Inventario Final, Días de Suministro (D/S) y Capacidad %.")
 
-    # 1. Selector de Estación
-    query_estaciones = "SELECT DISTINCT id_estacion, nombre, tad, plaza FROM estaciones_detalle ORDER BY id_estacion;"
+    if conn is None:
+        st.error("No hay conexión a la base de datos.")
+        return
+
     try:
+        # 1. Selector de Estación
+        query_estaciones = "SELECT DISTINCT id_estacion, nombre, tad, plaza FROM estaciones_detalle ORDER BY id_estacion;"
         df_estaciones = pd.read_sql(query_estaciones, conn)
+        
         if df_estaciones.empty:
-            st.warning("No hay estaciones registradas.")
+            st.warning("No hay estaciones registradas en la tabla estaciones_detalle.")
             return
 
-         estaciones_list = [f"{row['id_estacion']} - {row['nombre']}" for _, row in df_estaciones.iterrows()]
+        estaciones_list = [f"{row['id_estacion']} - {row['nombre']}" for _, row in df_estaciones.iterrows()]
         selected_estacion_str = st.selectbox("Selecciona la Estación a Programar:", estaciones_list)
         estacion_id = selected_estacion_str.split(" - ")[0]
 
@@ -60,7 +65,7 @@ def render(conn):
         df_factores = pd.read_sql(query_factores, conn)
 
         if df_factores.empty:
-            st.warning("No se encontraron factores calculados para esta estación. Revisa la vista vw_factor_real_vdp_ponderada.")
+            st.warning(f"No se encontraron factores calculados en la vista 'vw_factor_real_vdp_ponderada' para la estación {estacion_id}.")
             return
 
         # 5. Generar Línea de Tiempo (Próximos 8 días a partir de hoy)
@@ -75,10 +80,9 @@ def render(conn):
                      ('Diesel', inv_die, cap_die, 'diesel')]
 
         for prod_nombre, inv_actual, cap_max, prod_key in productos:
-            # Buscar datos del producto
-            prod_row = df_factores[df_factores['producto'] == prod_key]
+            prod_row = df_factores[df_factores['producto'].str.lower() == prod_key.lower()]
             if prod_row.empty or prod_row['vdp_ponderada'].iloc[0] == 0:
-                continue # Si no vende este producto, lo saltamos
+                continue
 
             vdp = prod_row['vdp_ponderada'].iloc[0]
             factores = [
@@ -91,7 +95,6 @@ def render(conn):
                 prod_row['fact_real_dom'].iloc[0]
             ]
 
-            # Calcular ventas estimadas para la línea de tiempo
             ventas_dia = []
             inventarios_dia = []
             ds_dia = []
@@ -99,28 +102,21 @@ def render(conn):
             
             inv_rolling = inv_actual
             for idx, f_date in enumerate(fechas):
-                # Determinar índice de día de la semana (0=Lunes ... 6=Domingo)
                 isodow = f_date.isoweekday() - 1 # 0 a 6
-                factor_hoy = factores[isodow]
+                factor_hoy = factores[isodow] if pd.notna(factores[isodow]) else 1.0
                 venta_est = round(vdp * factor_hoy, 0)
                 ventas_dia.append(venta_est)
 
-                # Compra programada por defecto en 0 (puedes enlazarla a tu tabla de pedidos despues)
                 compra_est = 0.0 
-
-                # Inventario final del día
                 inv_rolling = inv_rolling + compra_est - venta_est
                 inventarios_dia.append(round(inv_rolling, 0))
 
-                # Días de Suministro (D/S)
                 ds = round(inv_rolling / vdp, 1) if vdp > 0 else 0.0
                 ds_dia.append(ds)
 
-                # Capacidad %
                 cap_p = round((inv_rolling / cap_max) * 100, 0) if cap_max > 0 else 0.0
                 cap_pct_dia.append(f"{cap_p:.0f}%")
 
-            # Crear las filas estilo MRP para este producto
             base_meta = {
                 "User": "Sistema",
                 "ID": estacion_id,
@@ -171,9 +167,13 @@ def render(conn):
                 f_cap[c_name] = val
             filas_matriz.append(f_cap)
 
+        if not filas_matriz:
+            st.info("No hay datos suficientes para calcular la matriz con los productos configurados.")
+            return
+
         # Renderizar la tabla final en Streamlit
         df_matriz = pd.DataFrame(filas_matriz)
         st.dataframe(df_matriz, width='stretch', height=500, hide_index=True)
 
     except Exception as e:
-        st.error(f"Error al generar la matriz de programación: {e}")
+        st.error(f"Error detallado en la matriz de programación: {e}")
