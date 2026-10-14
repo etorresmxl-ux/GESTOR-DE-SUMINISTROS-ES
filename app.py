@@ -45,7 +45,7 @@ if conn:
     elif menu == "📊 Registro de Ventas":
         ventas.render(conn)
     elif menu == "🚛 Programación de Cargas":
-        cargas.render(conn)
+        programacion.render(conn)
     
     conn.close()
 else:
