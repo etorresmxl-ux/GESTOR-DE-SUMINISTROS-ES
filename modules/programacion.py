@@ -11,23 +11,22 @@ def render(conn):
         return
 
     try:
-        # 1. Consultar la relación de estaciones y programadores haciendo join con estaciones_detalle
+        # 1. Consultar todo directamente desde estaciones_detalle agrupando por usuario
         query_base = """
-            SELECT 
-                e.id AS id_estacion, 
-                e.usuario AS programador,
-                ed.nombre AS estacion_nombre, 
-                ed.tad AS proveedor, 
-                ed.plaza
-            FROM estaciones e
-            JOIN estaciones_detalle ed ON e.id = ed.id_estacion
-            WHERE e.usuario IS NOT NULL
-            ORDER BY e.usuario, e.id;
+            SELECT DISTINCT 
+                id_estacion, 
+                nombre AS estacion_nombre, 
+                tad AS proveedor, 
+                plaza,
+                "user" AS programador
+            FROM estaciones_detalle
+            WHERE "user" IS NOT NULL
+            ORDER BY "user", id_estacion;
         """
         df_estaciones = pd.read_sql(query_base, conn)
         
         if df_estaciones.empty:
-            st.warning("No se encontraron registros en la relación de estaciones y programadores.")
+            st.warning("No se encontraron registros de estaciones o programadores en estaciones_detalle.")
             return
 
         # 2. Filtros Superiores: Programador y Nombre de Estación
@@ -51,7 +50,7 @@ def render(conn):
         estacion_id_sel = selected_est_str.split(" - ")[0]
         row_estacion = df_estaciones[df_estaciones['id_estacion'] == estacion_id_sel].iloc[0]
 
-        # 3. Consultar Inventarios Actuales de la estación (Inventario Inicial de hoy)
+        # 3. Consultar Inventarios Actuales de la estación
         query_inv = f"""
             SELECT regular, premium, diesel 
             FROM inventarios_historico 
@@ -102,7 +101,7 @@ def render(conn):
         for prod_nombre, inv_inicial, vdp_val in productos_config:
             inv_ini = float(inv_inicial)
             vdp = float(vdp_val)
-            inv_final = inv_ini - vdp  # Inventario Final = Inv Inicial - Venta Proyectada + Carga (0)
+            inv_final = inv_ini - vdp
 
             tabla_prod = pd.DataFrame({
                 "id_estacion": [id_est],
@@ -111,7 +110,7 @@ def render(conn):
                 "Proveedor": [prov_est],
                 "Inventario Inicial": [f"{inv_ini:,.0f} L"],
                 "Venta Diaria Proyectada": [f"{vdp:,.0f} L"],
-                "Carga Programada": ["-"],  # Espacio reservado para futura implementación
+                "Carga Programada": ["-"],
                 "Inventario Final": [f"{inv_final:,.0f} L"]
             })
 
