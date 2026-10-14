@@ -41,12 +41,12 @@ def render(conn):
             st.warning("No hay datos suficientes para generar el resumen.")
             return
 
-        # Calcular los días de suministro numéricos internamente para las reglas y alertas
-        df['ds_r'] = df.apply(lambda r: r['reg_litros'] / r['vdp_reg'] if r['vdp_reg'] > 0 else None, axis=1)
-        df['ds_p'] = df.apply(lambda r: r['pre_litros'] / r['vdp_pre'] if r['vdp_pre'] > 0 else None, axis=1)
-        df['ds_d'] = df.apply(lambda r: r['die_litros'] / r['vdp_die'] if r['vdp_die'] > 0 else None, axis=1)
+        # Calcular los días de suministro numéricos
+        df['ds_r'] = df.apply(lambda r: round(r['reg_litros'] / r['vdp_reg'], 1) if r['vdp_reg'] > 0 else None, axis=1)
+        df['ds_p'] = df.apply(lambda r: round(r['pre_litros'] / r['vdp_pre'], 1) if r['vdp_pre'] > 0 else None, axis=1)
+        df['ds_d'] = df.apply(lambda r: round(r['die_litros'] / r['vdp_die'], 1) if r['vdp_die'] > 0 else None, axis=1)
 
-        # Construcción de la tabla base para visualización
+        # Construcción de la tabla base conservando tipos de datos homogéneos
         tabla_vis = pd.DataFrame({
             "Proveedor": df['proveedor'],
             "ID": df['id_estacion'],
@@ -56,17 +56,16 @@ def render(conn):
             "Regular": df['reg_litros'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-"),
             "Premium": df['pre_litros'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-"),
             "Diesel": df['die_litros'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-"),
-            "D/S R": df['ds_r'].apply(lambda x: round(x, 1) if x is not None else ""),
-            "D/S P": df['ds_p'].apply(lambda x: round(x, 1) if x is not None else ""),
-            "D/S D": df['ds_d'].apply(lambda x: round(x, 1) if x is not None else ""),
+            "D/S R": df['ds_r'],
+            "D/S P": df['ds_p'],
+            "D/S D": df['ds_d'],
         })
 
-        # Función de estilo para pintar celdas de D/S y Litros según los días de inventario
+        # Función de estilo para pintar celdas según el semáforo operativo
         def aplicar_semaforo(row_idx):
             estilos = [''] * len(tabla_vis.columns)
             r = df.iloc[row_idx]
             
-            # Mapeo de columnas de inventario/litros y sus respectivos D/S
             mapeo = [
                 ('Regular', 'D/S R', r['ds_r']),
                 ('Premium', 'D/S P', r['ds_p']),
@@ -74,15 +73,14 @@ def render(conn):
             ]
             
             for col_litro, col_ds, ds_val in mapeo:
-                if ds_val is not None:
+                if pd.notna(ds_val):
                     if ds_val < 1.0:
-                        color = 'background-color: #ffcccc; color: #990000; font-weight: bold;' # Rojo crítico
+                        color = 'background-color: #ffcccc; color: #990000; font-weight: bold;' # Rojo crítico (< 1 día)
                     elif ds_val < 2.0:
-                        color = 'background-color: #fff2cc; color: #b26b00; font-weight: bold;' # Amarillo advertencia
+                        color = 'background-color: #fff2cc; color: #b26b00; font-weight: bold;' # Amarillo advertencia (< 2 días)
                     else:
                         continue
                     
-                    # Pintar tanto la columna de litros como la de D/S
                     if col_litro in tabla_vis.columns:
                         estilos[tabla_vis.columns.get_loc(col_litro)] = color
                     if col_ds in tabla_vis.columns:
@@ -91,7 +89,7 @@ def render(conn):
 
         tabla_estilizada = tabla_vis.style.apply(aplicar_semaforo, axis=1)
 
-        # Mostrar tabla interactiva en Streamlit
+        # Mostrar tabla principal en Streamlit
         st.dataframe(tabla_estilizada, use_container_width=True, height=450, hide_index=True)
 
         # ==========================================
@@ -107,10 +105,10 @@ def render(conn):
                          ('Diesel', r['ds_d'], r['die_litros'])]
             
             for prod, ds, litros in productos:
-                if ds is not None:
+                if pd.notna(ds):
                     if ds < 1.0:
                         alertas.append({
-                            "prioridad": 1, # Rojo (Más crítico)
+                            "prioridad": 1, 
                             "nivel": "🔴 CRÍTICO (< 1 Día)",
                             "estacion": f"{r['id_estacion']} - {r['estacion']}",
                             "plaza": r['plaza'],
@@ -120,7 +118,7 @@ def render(conn):
                         })
                     elif ds < 2.0:
                         alertas.append({
-                            "prioridad": 2, # Amarillo (Advertencia)
+                            "prioridad": 2, 
                             "nivel": "🟡 ADVERTENCIA (< 2 Días)",
                             "estacion": f"{r['id_estacion']} - {r['estacion']}",
                             "plaza": r['plaza'],
@@ -132,12 +130,10 @@ def render(conn):
         if not alertas:
             st.success("✅ ¡Excelente noticia! No hay estaciones con niveles críticos o de advertencia en este momento.")
         else:
-            # Ordenar alertas: primero prioridad 1 (rojas) y luego prioridad 2 (amarillas)
+            # Ordenar: primero rojas (prioridad 1), luego amarillas (prioridad 2)
             alertas_ordenadas = sorted(alertas, key=lambda x: (x['prioridad'], x['ds']))
-            
             df_alertas = pd.DataFrame(alertas_ordenadas)
             
-            # Formato visual para el resumen de alertas
             tabla_alertas_vis = pd.DataFrame({
                 "Estatus": df_alertas['nivel'],
                 "Estación": df_alertas['estacion'],
