@@ -4,7 +4,7 @@ import numpy as np
 
 def render(conn):
     st.markdown("### 📊 Dashboard Operativo - Inventarios, Espacio Disponible y Días de Suministro (D/S)")
-    st.write("Resumen general por estación: Inventario actual, capacidad disponible al 90% y Días de Suministro calculados con VDP ponderada (12 semanas).")
+    st.write("Resumen general por estación: Inventario actual, capacidad disponible y Días de Suministro calculados con VDP ponderada (12 semanas).")
     
     query = """
         WITH ultimo_inventario AS (
