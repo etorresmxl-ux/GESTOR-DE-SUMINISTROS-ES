@@ -44,51 +44,22 @@ def render(conn):
             st.warning("No hay datos suficientes para generar el resumen.")
             return
 
-        # ==========================================
-        # FILTROS ESTILO ON/OFF (BARRA LATERAL O SUPERIOR)
-        # ==========================================
-        st.markdown("#### filters_icon 🔍 Filtros de Filtrado Rápido")
-        col_f1, col_f2, col_f3 = st.columns(3)
-        
-        with col_f1:
-            proveedores_disponibles = sorted(df['proveedor'].dropna().unique())
-            sel_proveedor = st.multiselect("Proveedor", options=proveedores_disponibles, default=proveedores_disponibles)
-            
-        with col_f2:
-            plazas_disponibles = sorted(df['plaza'].dropna().unique())
-            sel_plaza = st.multiselect("Plaza", options=plazas_disponibles, default=plazas_disponibles)
-            
-        with col_f3:
-            tads_disponibles = sorted(df['tad'].dropna().unique())
-            sel_tad = st.multiselect("Terminal (TAD)", options=tads_disponibles, default=tads_disponibles)
-
-        # Aplicar filtros al DataFrame
-        df_filtrado = df[
-            df['proveedor'].isin(sel_proveedor) & 
-            df['plaza'].isin(sel_plaza) & 
-            df['tad'].isin(sel_tad)
-        ]
-
-        if df_filtrado.empty:
-            st.warning("No hay estaciones que coincidan con los filtros seleccionados.")
-            return
-
-        # Construcción de la tabla final
+        # Construcción de la tabla final sin filtros
         tabla_final = pd.DataFrame({
-            "Proveedor": df_filtrado['proveedor'],
-            "ID": df_filtrado['id_estacion'],
-            "TAD": df_filtrado['tad'],
-            "Plaza": df_filtrado['plaza'],
-            "Estacion": df_filtrado['estacion'],
-            "Regular": df_filtrado['reg_litros'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-"),
-            "Premium": df_filtrado['pre_litros'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-"),
-            "Diesel": df_filtrado['die_litros'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-"),
-            "D/S R": df_filtrado.apply(lambda r: round(r['reg_litros'] / r['vdp_reg'], 1) if r['vdp_reg'] > 0 and r['vdp_reg'] is not None else "", axis=1),
-            "D/S P": df_filtrado.apply(lambda r: round(r['pre_litros'] / r['vdp_pre'], 1) if r['vdp_pre'] > 0 and r['vdp_pre'] is not None else "", axis=1),
-            "D/S D": df_filtrado.apply(lambda r: round(r['die_litros'] / r['vdp_die'], 1) if r['vdp_die'] > 0 and r['vdp_die'] is not None else "", axis=1),
+            "Proveedor": df['proveedor'],
+            "ID": df['id_estacion'],
+            "TAD": df['tad'],
+            "Plaza": df['plaza'],
+            "Estacion": df['estacion'],
+            "Regular": df['reg_litros'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-"),
+            "Premium": df['pre_litros'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-"),
+            "Diesel": df['die_litros'].apply(lambda x: f"{x:,.0f}" if x > 0 else "-"),
+            "D/S R": df.apply(lambda r: round(r['reg_litros'] / r['vdp_reg'], 1) if r['vdp_reg'] > 0 and r['vdp_reg'] is not None else "", axis=1),
+            "D/S P": df.apply(lambda r: round(r['pre_litros'] / r['vdp_pre'], 1) if r['vdp_pre'] > 0 and r['vdp_pre'] is not None else "", axis=1),
+            "D/S D": df.apply(lambda r: round(r['die_litros'] / r['vdp_die'], 1) if r['vdp_die'] > 0 and r['vdp_die'] is not None else "", axis=1),
         })
 
-        # Mostrar tabla interactiva en Streamlit ocultando el índice por defecto mediante hide_index=True
+        # Mostrar tabla interactiva en Streamlit ocultando el índice y adaptada al ancho
         st.dataframe(tabla_final, use_container_width=True, height=550, hide_index=True)
         
     except Exception as e:
