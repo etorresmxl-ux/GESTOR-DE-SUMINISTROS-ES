@@ -19,9 +19,9 @@ def render(conn):
         capacidades_productos AS (
             SELECT 
                 id_estacion,
-                SUM(CASE WHEN producto ILIKE '%regular%' OR producto ILIKE '%magna%' THEN capacidad_máxima ELSE 0 END) as cap_regular,
-                SUM(CASE WHEN producto ILIKE '%premium%' THEN capacidad_máxima ELSE 0 END) as cap_premium,
-                SUM(CASE WHEN producto ILIKE '%diesel%' THEN capacidad_máxima ELSE 0 END) as cap_diesel
+                SUM(CASE WHEN producto ILIKE '%regular%' OR producto ILIKE '%magna%' THEN capacidad_maxima ELSE 0 END) as cap_regular,
+                SUM(CASE WHEN producto ILIKE '%premium%' THEN capacidad_maxima ELSE 0 END) as cap_premium,
+                SUM(CASE WHEN producto ILIKE '%diesel%' THEN capacidad_maxima ELSE 0 END) as cap_diesel
             FROM estaciones_detalle
             GROUP BY id_estacion
         ),
