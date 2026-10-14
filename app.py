@@ -1,6 +1,6 @@
 import streamlit as st
 from database import init_connection
-from modules import tanques, inventario, ventas, cargas, estaciones, capacidades, importador
+from modules import tanques, inventario, ventas, cargas, estaciones, importador
 
 st.set_page_config(
     page_title="Gestión de Suministro - Gasolineras",
@@ -15,7 +15,6 @@ menu = st.sidebar.selectbox(
     "Selecciona un Módulo",
     [
         "🏢 Catálogo de Estaciones", 
-        "📊 Capacidades y Promedios",
         "📥 Importar Masivos (CSV)",
         "📊 Estado de Tanques", 
         "📝 Registro de Inventarios", 
@@ -29,8 +28,6 @@ conn = init_connection()
 if conn:
     if menu == "🏢 Catálogo de Estaciones":
         estaciones.render(conn)
-    elif menu == "📊 Capacidades y Promedios":
-        capacidades.render(conn)
     elif menu == "📥 Importar Masivos (CSV)":
         importador.render(conn)
     elif menu == "📊 Estado de Tanques":
