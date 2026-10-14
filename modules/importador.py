@@ -19,8 +19,13 @@ def render(conn):
         if file_inv is not None:
             try:
                 df_inv = pd.read_csv(file_inv)
-                st.write("Vista previa de los datos a importar:")
-                st.dataframe(df_inv.head(), use_container_width=True)
+                total_filas = len(df_inv)
+                
+                # Métrica y resumen rápido
+                st.info(f"📊 Archivo cargado correctamente. **Total de registros a procesar: {total_filas}**")
+                
+                st.write("Vista previa de los datos:")
+                st.dataframe(df_inv, use_container_width=True, height=250)
                 
                 if st.button("🚀 Procesar e Importar Inventarios", key="btn_imp_inv"):
                     cursor = conn.cursor()
@@ -47,7 +52,7 @@ def render(conn):
                         
                     conn.commit()
                     cursor.close()
-                    st.success(f"¡Se procesaron e importaron {count} registros de inventarios exitosamente (con actualización automática en duplicados)!")
+                    st.success(f"¡Se procesaron e importaron {count} de {total_filas} registros de inventarios exitosamente!")
             except Exception as e:
                 st.error(f"Error al procesar el archivo de inventarios: {e}")
 
@@ -63,8 +68,13 @@ def render(conn):
         if file_ventas is not None:
             try:
                 df_ventas = pd.read_csv(file_ventas)
-                st.write("Vista previa de los datos a importar:")
-                st.dataframe(df_ventas.head(), use_container_width=True)
+                total_filas_v = len(df_ventas)
+                
+                # Métrica y resumen rápido
+                st.info(f"📊 Archivo cargado correctamente. **Total de registros a procesar: {total_filas_v}**")
+                
+                st.write("Vista previa de los datos:")
+                st.dataframe(df_ventas, use_container_width=True, height=250)
                 
                 if st.button("🚀 Procesar e Importar Ventas", key="btn_imp_ventas"):
                     cursor = conn.cursor()
@@ -90,6 +100,6 @@ def render(conn):
                         
                     conn.commit()
                     cursor.close()
-                    st.success(f"¡Se procesaron e importaron {count} registros de ventas exitosamente (con actualización automática en duplicados)!")
+                    st.success(f"¡Se procesaron e importaron {count} de {total_filas_v} registros de ventas exitosamente!")
             except Exception as e:
                 st.error(f"Error al procesar el archivo de ventas: {e}")
