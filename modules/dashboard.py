@@ -121,7 +121,7 @@ def render(conn):
                 "Plaza": df_alertas['plaza'],
                 "Producto": df_alertas['producto'],
                 "Inventario Actual": df_alertas['litros'].apply(lambda x: f"{x:,.0f} L"),
-                "Espacio para 90%": df_alertas['espacio'].apply(lambda x: f"{x:,.0f} L"),
+                "Espacio Disponible": df_alertas['espacio'].apply(lambda x: f"{x:,.0f} L"),
                 "Días de Suministro": df_alertas['ds'].apply(lambda x: f"{x:.1f} días")
             })
             
