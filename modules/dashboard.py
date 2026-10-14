@@ -149,7 +149,7 @@ def render(conn):
 
         df['semaforo'] = df.apply(calcular_semaforo, axis=1)
 
-        # Construcción de la tabla visual integrando inventario, capacidad máxima y D/S (con N/A si no aplica)
+        # Construcción de la tabla visual integrando inventario, capacidad máxima, D/S y VDP
         tabla_vis = pd.DataFrame({
             "Semáforo": df['semaforo'],
             "ID": df['id_estacion'].astype(str),
@@ -162,10 +162,10 @@ def render(conn):
             "Pre (Inv / Cap.Max)": df.apply(lambda r: f"{r['pre_litros']:,.0f} L / {r['cap_premium']:,.0f} L" if r['cap_premium'] > 0 else "N/A", axis=1),
             "Die (Inv / Cap.Max)": df.apply(lambda r: f"{r['die_litros']:,.0f} L / {r['cap_diesel']:,.0f} L" if r['cap_diesel'] > 0 else "N/A", axis=1),
             
-            # Días de Suministro
-            "D/S R": df.apply(lambda r: f"{r['ds_r']:.1f}" if r['cap_regular'] > 0 and pd.notna(r['ds_r']) else "N/A", axis=1),
-            "D/S P": df.apply(lambda r: f"{r['ds_p']:.1f}" if r['cap_premium'] > 0 and pd.notna(r['ds_p']) else "N/A", axis=1),
-            "D/S D": df.apply(lambda r: f"{r['ds_d']:.1f}" if r['cap_diesel'] > 0 and pd.notna(r['ds_d']) else "N/A", axis=1),
+            # Días de Suministro y VDP
+            "D/S R (VDP)": df.apply(lambda r: f"{r['ds_r']:.1f} días (VDP: {r['vdp_reg']:,.0f} L)" if r['cap_regular'] > 0 and pd.notna(r['ds_r']) else "N/A", axis=1),
+            "D/S P (VDP)": df.apply(lambda r: f"{r['ds_p']:.1f} días (VDP: {r['vdp_pre']:,.0f} L)" if r['cap_premium'] > 0 and pd.notna(r['ds_p']) else "N/A", axis=1),
+            "D/S D (VDP)": df.apply(lambda r: f"{r['ds_d']:.1f} días (VDP: {r['vdp_die']:,.0f} L)" if r['cap_diesel'] > 0 and pd.notna(r['ds_d']) else "N/A", axis=1),
         })
 
         st.dataframe(tabla_vis, width='stretch', height=450, hide_index=True)
