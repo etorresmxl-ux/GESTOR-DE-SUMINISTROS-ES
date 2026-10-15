@@ -13,7 +13,7 @@ def render(conn):
                 regular,
                 premium,
                 diesel,
-                ROW_NUMBER() OVER(PARTITION BY estacion_id ORDER BY fecha DESC, turno DESC) as rn
+                ROW_NUMBER() OVER(PARTITION BY estacion_id ORDER BY fecha DESC) as rn
             FROM inventarios_historico
         ),
         capacidades_productos AS (
