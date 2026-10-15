@@ -56,11 +56,12 @@ def render(conn):
             p_key = str(r['producto']).lower()
             capacidades[p_key] = float(r['capacidad_maxima']) if pd.notna(r['capacidad_maxima']) else 100000.0
 
-        # 3. Título Destacado con ID y Nombre de la Estación
+        # 3. Título Destacado con ID y Nombre de la Estación (Sin tabla de usuario/plaza)
         st.markdown("---")
         st.markdown(f"## ⛽ {estacion_id_sel} - {row_estacion['estacion_nombre']}")
+        st.markdown("---")
         
-        # 4. Definir rango de fechas (14 días a partir de hoy) - Formato dd-mmm
+        # 4. Definir rango de fechas (14 días a partir de hoy) - Solo formato dd-mmm
         dias_proyeccion = 14
         hoy = date.today()
         fechas = [hoy + timedelta(days=i) for i in range(dias_proyeccion)]
@@ -144,15 +145,15 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar la VDP ponderada y factores: {e}")
 
-        # 8. Renderizar Matriz por Producto con colores específicos
+        # 8. Renderizar Matriz por Producto con colores personalizados en los títulos
         productos = [
-            ("REGULAR", "regular", ":green[REGULAR]"), 
-            ("PREMIUM", "premium", ":orange[PREMIUM]"), 
-            ("DIESEL", "diesel", ":gray[DIESEL]")
+            ("REGULAR", "regular", "<span style='color:#2ecc71;'>REGULAR</span>"), 
+            ("PREMIUM", "premium", "<span style='color:#e67e22;'>PREMIUM</span>"), 
+            ("DIESEL", "diesel", "<span style='color:#7f8c8d;'>DIESEL</span>")
         ]
 
-        for prod_label, prod_key, prod_title_markdown in productos:
-            st.markdown(f"#### ⛽ {prod_title_markdown}")
+        for prod_label, prod_key, prod_title_html in productos:
+            st.markdown(f"#### ⛽ {prod_title_html}", unsafe_allow_html=True)
             
             inv_ini_row = []
             espacio_disp_row = []
@@ -228,15 +229,15 @@ def render(conn):
         st.markdown("#### 📝 Editor de Programa de Carga (14 Días)")
         st.write("Modifica directamente los volúmenes de carga en la tabla inferior y haz clic en **Guardar Cambios**.")
 
-        # Construir DataFrame para el editor (3 filas: Regular, Premium, Diesel; 14 columnas de fechas dd-mmm)
+        # Construir DataFrame para el editor con formato de miles (string formateado para visualización inicial)
         editor_data = {}
         for col_n in col_names:
             f_obj = col_to_date[col_n]
             f_str_k = f_obj.strftime("%Y-%m-%d")
             editor_data[col_n] = [
-                float(cargas_guardadas.get((f_str_k, "regular"), 0.0)),
-                float(cargas_guardadas.get((f_str_k, "premium"), 0.0)),
-                float(cargas_guardadas.get((f_str_k, "diesel"), 0.0))
+                f"{cargas_guardadas.get((f_str_k, 'regular'), 0.0):,.0f}",
+                f"{cargas_guardadas.get((f_str_k, 'premium'), 0.0):,.0f}",
+                f"{cargas_guardadas.get((f_str_k, 'diesel'), 0.0):,.0f}"
             ]
 
         df_editor = pd.DataFrame(editor_data, index=["Regular", "Premium", "Diesel"])
@@ -257,7 +258,15 @@ def render(conn):
                     for prod_name in ["Regular", "Premium", "Diesel"]:
                         p_str = prod_name.strip().lower()
                         for col_n in col_names:
-                            volumen_val = float(edited_df.loc[prod_name, col_n])
+                            val_raw = edited_df.loc[prod_name, col_n]
+                            
+                            # Limpiar comas o caracteres extra que el usuario haya puesto al editar
+                            if isinstance(val_raw, str):
+                                val_clean = val_raw.replace(',', '').strip()
+                                volumen_val = float(val_clean) if val_clean and val_clean != '-' else 0.0
+                            else:
+                                volumen_val = float(val_raw) if pd.notna(val_raw) else 0.0
+
                             f_obj = col_to_date[col_n]
                             f_str = f_obj.strftime("%Y-%m-%d")
                             
