@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 def render(conn):
     st.markdown("### 🚛 Matriz de Programación y Suministro (MRP)")
-    st.write("Planificación multicierre a 14 días por estación y producto.")
+    st.write("Planificación multicierre a 14 días por estación y producto con registro de pedidos.")
 
     if conn is None:
         st.error("No hay conexión a la base de datos.")
@@ -56,7 +56,7 @@ def render(conn):
             p_key = str(r['producto']).lower()
             capacidades[p_key] = float(r['capacidad_maxima']) if pd.notna(r['capacidad_maxima']) else 100000.0
 
-        # 3. Cabecera de Información de la Estación (Estilo de la imagen)
+        # 3. Cabecera de Información de la Estación
         st.markdown("---")
         st.markdown(f"""
         | User | ID Estación | Destino (TAD) | Proveedor | Estación | Plaza |
@@ -70,12 +70,29 @@ def render(conn):
         hoy = date.today()
         fechas = [hoy + timedelta(days=i) for i in range(dias_proyeccion)]
         
-        # Generar nombres de columnas formateados (ej. "lun. 12-oct")
         dias_semana = ['lun.', 'mar.', 'mié.', 'jue.', 'vie.', 'sáb.', 'dom.']
         meses = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.']
         col_names = [f"{dias_semana[f.weekday()]} {f.day:02d}-{meses[f.month-1]}" for f in fechas]
 
-        # 5. Obtener Inventario Inicial actual del producto
+        # 5. Consultar Cargas Programadas guardadas en la base de datos para esta estación
+        cargas_guardadas = {} # {(fecha_str, producto): volumen}
+        try:
+            query_cargas_db = f"""
+                SELECT fecha_programacion, producto, volumen_programado 
+                FROM programacion_cargas 
+                WHERE id_estacion = '{estacion_id_sel}';
+            """
+            df_cargas_db = pd.read_sql(query_cargas_db, conn)
+            if not df_cargas_db.empty:
+                for _, r in df_cargas_db.iterrows():
+                    f_str = str(r['fecha_programacion']).split("T")[0]
+                    p_str = str(r['producto']).strip().lower()
+                    vol = float(r['volumen_programado']) if pd.notna(r['volumen_programado']) else 0.0
+                    cargas_guardadas[(f_str, p_str)] = vol
+        except Exception:
+            pass
+
+        # 6. Obtener Inventario Inicial actual del producto
         inv_actuales = {"regular": 0.0, "premium": 0.0, "diesel": 0.0}
         try:
             query_inv = f"""
@@ -93,7 +110,7 @@ def render(conn):
         except Exception:
             pass
 
-        # 6. Obtener VDP Ponderada (Venta Proyectada Diaria)
+        # 7. Obtener VDP Ponderada (Venta Proyectada Diaria)
         vdp_dict = {"regular": 0.0, "premium": 0.0, "diesel": 0.0}
         try:
             query_vdp = f"""
@@ -115,13 +132,12 @@ def render(conn):
         except Exception:
             pass
 
-        # 7. Renderizar Matriz por Producto
+        # 8. Renderizar Matriz por Producto
         productos = [("REGULAR", "regular"), ("PREMIUM", "premium"), ("DIESEL", "diesel")]
 
         for prod_label, prod_key in productos:
             st.markdown(f"#### ⛽ {prod_label}")
             
-            # Construir filas para los 14 días
             inv_ini_row = []
             carga_row = []
             vta_row = []
@@ -134,37 +150,29 @@ def render(conn):
             cap_max = capacidades.get(prod_key, 100000.0)
 
             for i, f_date in enumerate(fechas):
-                # Inventario inicial del día (el primer día usa el real, los siguientes usan el final del día anterior)
                 if i == 0:
                     inv_ini = inv_actual
                 else:
                     inv_ini = inv_fin_prev
 
-                # Carga programada (por defecto 0 o consultada de la BD)
-                carga = 0.0 
+                # Carga recuperada de la base de datos para esta fecha y producto
+                f_str_key = f_date.strftime("%Y-%m-%d")
+                carga = cargas_guardadas.get((f_str_key, prod_key), 0.0)
                 
-                # Venta proyectada
                 vta = vdp_val
-
-                # Inventario final
                 inv_fin = inv_ini + carga - vta
                 inv_fin_prev = inv_fin
 
-                # D/S (Days of Supply) = Inventario Final / Venta Proyectada
                 ds = (inv_fin / vta) if vta > 0 else 0.0
-
-                # % Tanque (Final) = Inventario Final / Capacidad Máxima
                 pct = (inv_fin / cap_max) * 100 if cap_max > 0 else 0.0
 
-                # Formato de valores
                 inv_ini_row.append(f"{inv_ini:,.0f}")
-                carga_row.append(f"{carga:,.0f}")
+                carga_row.append(f"{carga:,.0f}" if carga > 0 else "-")
                 vta_row.append(f"{vta:,.0f}")
                 inv_fin_row.append(f"{inv_fin:,.0f}")
                 ds_row.append(f"{ds:.1f} d")
                 pct_row.append(f"{pct:.1f}%")
 
-            # Crear DataFrame con el layout exacto de la matriz
             df_matriz = pd.DataFrame(
                 [
                     inv_ini_row,
@@ -187,6 +195,64 @@ def render(conn):
 
             st.dataframe(df_matriz, width='stretch')
             st.markdown("")
+
+        # 9. Sección para Registrar / Actualizar Pedidos (Programa de Carga)
+        st.markdown("---")
+        st.markdown("#### 📝 Registrar o Modificar Pedido (Carga)")
+        
+        with st.form("form_registro_carga"):
+            c_f1, c_f2, c_f3 = st.columns(3)
+            with c_f1:
+                fecha_pedido = st.date_input("Fecha de Carga", date.today())
+            with c_f2:
+                producto_pedido = st.selectbox("Producto", ["Regular", "Premium", "Diesel"])
+            with c_f3:
+                volumen_pedido = st.number_input("Volumen a Programar (Litros)", min_value=0.0, step=1000.0, format="%.2f")
+                
+            submitted = st.form_submit_button("Guardar Pedido")
+            
+            if submitted:
+                f_str = fecha_pedido.strftime("%Y-%m-%d")
+                p_str = producto_pedido.strip().lower()
+                user_actual = row_estacion['programador']
+                
+                cursor = conn.cursor()
+                try:
+                    # Verificar si ya existe un registro para esta estación, fecha y producto
+                    check_query = f"""
+                        SELECT id FROM programacion_cargas 
+                        WHERE id_estacion = '{estacion_id_sel}' 
+                          AND fecha_programacion = '{f_str}' 
+                          AND LOWER(producto) = '{p_str}';
+                    """
+                    cursor.execute(check_query)
+                    existing = cursor.fetchone()
+                    
+                    if existing:
+                        # Actualizar volumen existente
+                        update_query = f"""
+                            UPDATE programacion_cargas 
+                            SET volumen_programado = {volumen_pedido}, "user" = '{user_actual}'
+                            WHERE id_estacion = '{estacion_id_sel}' 
+                              AND fecha_programacion = '{f_str}' 
+                              AND LOWER(producto) = '{p_str}';
+                        """
+                        cursor.execute(update_query)
+                    else:
+                        # Insertar nuevo registro con los campos exactos de la tabla
+                        insert_query = f"""
+                            INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado, "user")
+                            VALUES ('{estacion_id_sel}', '{producto_pedido}', '{f_str}', {volumen_pedido}, '{user_actual}');
+                        """
+                        cursor.execute(insert_query)
+                        
+                    conn.commit()
+                    cursor.close()
+                    st.success(f"¡Pedido de {volumen_pedido:,.0f} L de {producto_pedido} guardado correctamente para el {f_str}!")
+                    st.rerun()
+                except Exception as db_err:
+                    conn.rollback()
+                    st.error(f"Error al guardar el pedido en la base de datos: {db_err}")
 
     except Exception as e:
         st.error(f"Error al generar la matriz MRP: {e}")
