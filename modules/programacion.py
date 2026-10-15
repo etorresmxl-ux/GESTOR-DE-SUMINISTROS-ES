@@ -49,7 +49,7 @@ def render(conn):
         estacion_id_sel = selected_est_str.split(" - ")[0]
         row_estacion = df_filtrado_prog[df_filtrado_prog['id_estacion'] == estacion_id_sel].iloc[0]
 
-        # Obtener capacidades máximas por producto para la estación desde estaciones_detalle
+        # Obtener capacidades máximas por producto para la estación
         capacidades = {}
         df_caps = df_filtrado_prog[df_filtrado_prog['id_estacion'] == estacion_id_sel]
         for _, r in df_caps.iterrows():
@@ -111,11 +111,13 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar inventarios históricos: {e}")
 
-        # 7. Obtener VDP Ponderada (Venta Proyectada Diaria)
-        vdp_dict = {"regular": 0.0, "premium": 0.0, "diesel": 0.0}
+        # 7. Obtener VDP Ponderada y Factores de Temporalidad por Día de la Semana
+        vdp_data_dict = {} # {prod_key: {'vdp': val, 'factores': {0: f_lun, 1: f_mar, ...}}}
         try:
             query_vdp = f"""
-                SELECT producto, vdp_ponderada 
+                SELECT producto, vdp_ponderada, 
+                       fact_real_lun, fact_real_mar, fact_real_mie, 
+                       fact_real_jue, fact_real_vie, fact_real_sab, fact_real_dom 
                 FROM vw_factor_real_vdp_ponderada 
                 WHERE estacion_id = '{estacion_id_sel}';
             """
@@ -123,15 +125,29 @@ def render(conn):
             if not df_vdp.empty:
                 for _, r in df_vdp.iterrows():
                     p_name = str(r['producto']).lower()
-                    val = float(r['vdp_ponderada']) if pd.notna(r['vdp_ponderada']) else 0.0
                     if 'regular' in p_name or 'magna' in p_name:
-                        vdp_dict['regular'] = val
+                        prod_k = 'regular'
                     elif 'premium' in p_name:
-                        vdp_dict['premium'] = val
+                        prod_k = 'premium'
                     elif 'diesel' in p_name:
-                        vdp_dict['diesel'] = val
+                        prod_k = 'diesel'
+                    else:
+                        continue
+                    
+                    vdp_val = float(r['vdp_ponderada']) if pd.notna(r['vdp_ponderada']) else 0.0
+                    # Mapeo de índices de weekday() de Python (0=Lunes, ..., 6=Domingo) a las columnas de la vista
+                    factores = {
+                        0: float(r['fact_real_lun']) if pd.notna(r['fact_real_lun']) else 1.0,
+                        1: float(r['fact_real_mar']) if pd.notna(r['fact_real_mar']) else 1.0,
+                        2: float(r['fact_real_mie']) if pd.notna(r['fact_real_mie']) else 1.0,
+                        3: float(r['fact_real_jue']) if pd.notna(r['fact_real_jue']) else 1.0,
+                        4: float(r['fact_real_vie']) if pd.notna(r['fact_real_vie']) else 1.0,
+                        5: float(r['fact_real_sab']) if pd.notna(r['fact_real_sab']) else 1.0,
+                        6: float(r['fact_real_dom']) if pd.notna(r['fact_real_dom']) else 1.0
+                    }
+                    vdp_data_dict[prod_k] = {'vdp': vdp_val, 'factores': factores}
         except Exception as e:
-            st.warning(f"Aviso al consultar la VDP ponderada: {e}")
+            st.warning(f"Aviso al consultar la VDP ponderada y factores: {e}")
 
         # 8. Renderizar Matriz por Producto
         productos = [("REGULAR", "regular"), ("PREMIUM", "premium"), ("DIESEL", "diesel")]
@@ -148,7 +164,10 @@ def render(conn):
             pct_row = []
 
             inv_actual = inv_actuales.get(prod_key, 0.0)
-            vdp_val = vdp_dict.get(prod_key, 0.0)
+            prod_info = vdp_data_dict.get(prod_key, {'vdp': 0.0, 'factores': {i: 1.0 for i in range(7)}})
+            vdp_base = prod_info['vdp']
+            factores_dia = prod_info['factores']
+            
             cap_max = capacidades.get(prod_key, 100000.0)
             inv_fin_prev = 0.0
 
@@ -165,7 +184,11 @@ def render(conn):
                 f_str_key = f_date.strftime("%Y-%m-%d")
                 carga = cargas_guardadas.get((f_str_key, prod_key), 0.0)
                 
-                vta = vdp_val
+                # Venta proyectada ajustada con el factor del día de la semana correspondiente (weekday: 0=lun, ..., 6=dom)
+                dia_semana_idx = f_date.weekday()
+                factor_estacionario = factores_dia.get(dia_semana_idx, 1.0)
+                vta = vdp_base * factor_estacionario
+
                 inv_fin = inv_ini + carga - vta
                 inv_fin_prev = inv_fin
 
@@ -263,3 +286,4 @@ def render(conn):
 
     except Exception as e:
         st.error(f"Error al generar la matriz MRP: {e}")
+```[cite: 19]
