@@ -151,7 +151,7 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar la VDP ponderada y factores: {e}")
 
-        # 8. Renderizar Matriz por Producto usando st.dataframe nativo
+        # 8. Renderizar Matriz por Producto usando st.dataframe nativo (sin % de tanque final)
         productos = [
             ("REGULAR", "regular", "<span style='color:#2ecc71;'>REGULAR</span>"), 
             ("PREMIUM", "premium", "<span style='color:#e67e22;'>PREMIUM</span>"), 
@@ -167,7 +167,6 @@ def render(conn):
             vta_row = []
             inv_fin_row = []
             ds_row = []
-            pct_row = []
 
             inv_actual = inv_actuales.get(prod_key, 0.0)
             prod_info = vdp_data_dict.get(prod_key, {'vdp': 0.0, 'factores': {i: 1.0 for i in range(7)}})
@@ -195,7 +194,6 @@ def render(conn):
                 inv_fin_prev = inv_fin
 
                 ds = (inv_fin / vta) if vta > 0 else 0.0
-                pct = (inv_fin / cap_max) * 100 if cap_max > 0 else 0.0
 
                 # Alerta ⚠️ si el inventario final es menor a 5000
                 inv_fin_str = f"⚠️ {inv_fin:,.0f}" if inv_fin < 5000 else f"{inv_fin:,.0f}"
@@ -214,7 +212,6 @@ def render(conn):
                 vta_row.append(f"{vta:,.0f}")
                 inv_fin_row.append(inv_fin_str)
                 ds_row.append(ds_str)
-                pct_row.append(f"{pct:.1f}%")
 
             df_matriz = pd.DataFrame(
                 [
@@ -223,8 +220,7 @@ def render(conn):
                     carga_row,
                     vta_row,
                     inv_fin_row,
-                    ds_row,
-                    pct_row
+                    ds_row
                 ],
                 index=[
                     "Inventario Inicial",
@@ -232,8 +228,7 @@ def render(conn):
                     "Programa (Carga)",
                     "Venta Proyectada",
                     "Inventario Final",
-                    "D/S (Final)",
-                    "% Tanque (Final)"
+                    "D/S (Final)"
                 ],
                 columns=col_names_matrix
             )
