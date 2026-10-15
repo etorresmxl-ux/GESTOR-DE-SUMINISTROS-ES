@@ -151,7 +151,7 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar la VDP ponderada y factores: {e}")
 
-        # 8. Renderizar Matriz por Producto
+        # 8. Renderizar Matriz por Producto con el título colocado justo encima de cada tabla
         productos = [
             ("REGULAR", "regular", "<span style='color:#2ecc71;'>REGULAR</span>"), 
             ("PREMIUM", "premium", "<span style='color:#e67e22;'>PREMIUM</span>"), 
@@ -159,8 +159,6 @@ def render(conn):
         ]
 
         for prod_label, prod_key, prod_title_html in productos:
-            st.markdown(f"#### {prod_title_html}", unsafe_allow_html=True)
-            
             inv_ini_row = []
             espacio_disp_row = []
             carga_row = []
@@ -227,10 +225,12 @@ def render(conn):
                 columns=col_names_matrix
             )
 
+            # Título colocado inmediatamente antes de la tabla para mantener la cercanía visual
+            st.markdown(f"#### {prod_title_html}", unsafe_allow_html=True)
             st.dataframe(df_matriz, width='stretch')
-            st.markdown("")
+            st.markdown("<div style='margin-bottom: 25px;'></div>", unsafe_allow_html=True)
 
-        # 9. Sección Interactiva para Registrar / Actualizar Pedidos Masivos (con números puros)
+        # 9. Sección Interactiva para Registrar / Actualizar Pedidos Masivos
         st.markdown("---")
         st.markdown("#### 📝 Editor de Programa de Carga (14 Días)")
         st.write("Modifica directamente los volúmenes de carga en la tabla inferior y haz clic en **Guardar Cambios**.")
