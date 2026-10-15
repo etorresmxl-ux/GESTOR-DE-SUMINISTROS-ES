@@ -60,14 +60,13 @@ def render(conn):
         st.markdown("---")
         st.markdown(f"## ⛽ {estacion_id_sel} - {row_estacion['estacion_nombre']}")
         
-        # 4. Definir rango de fechas (14 días a partir de hoy)
+        # 4. Definir rango de fechas (14 días a partir de hoy) - Formato dd-mmm
         dias_proyeccion = 14
         hoy = date.today()
         fechas = [hoy + timedelta(days=i) for i in range(dias_proyeccion)]
         
-        dias_semana = ['lun.', 'mar.', 'mié.', 'jue.', 'vie.', 'sáb.', 'dom.']
         meses = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.']
-        col_names = [f"{dias_semana[f.weekday()]} {f.day:02d}-{meses[f.month-1]}" for f in fechas]
+        col_names = [f"{f.day:02d}-{meses[f.month-1]}" for f in fechas]
 
         # Mapeo inverso de columnas a objetos date para guardar
         col_to_date = {col_names[i]: fechas[i] for i in range(len(fechas))}
@@ -145,11 +144,15 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar la VDP ponderada y factores: {e}")
 
-        # 8. Renderizar Matriz por Producto
-        productos = [("REGULAR", "regular"), ("PREMIUM", "premium"), ("DIESEL", "diesel")]
+        # 8. Renderizar Matriz por Producto con colores específicos
+        productos = [
+            ("REGULAR", "regular", ":green[REGULAR]"), 
+            ("PREMIUM", "premium", ":orange[PREMIUM]"), 
+            ("DIESEL", "diesel", ":gray[DIESEL]")
+        ]
 
-        for prod_label, prod_key in productos:
-            st.markdown(f"#### ⛽ {prod_label}")
+        for prod_label, prod_key, prod_title_markdown in productos:
+            st.markdown(f"#### ⛽ {prod_title_markdown}")
             
             inv_ini_row = []
             espacio_disp_row = []
@@ -225,7 +228,7 @@ def render(conn):
         st.markdown("#### 📝 Editor de Programa de Carga (14 Días)")
         st.write("Modifica directamente los volúmenes de carga en la tabla inferior y haz clic en **Guardar Cambios**.")
 
-        # Construir DataFrame para el editor (3 filas: Regular, Premium, Diesel; 14 columnas de fechas)
+        # Construir DataFrame para el editor (3 filas: Regular, Premium, Diesel; 14 columnas de fechas dd-mmm)
         editor_data = {}
         for col_n in col_names:
             f_obj = col_to_date[col_n]
