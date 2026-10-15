@@ -92,14 +92,14 @@ def render(conn):
         except Exception:
             pass
 
-        # 6. Obtener Inventario Inicial actual del producto
+        # 6. Obtener Inventario Inicial actual del producto (CORREGIDO: Sin turno)
         inv_actuales = {"regular": 0.0, "premium": 0.0, "diesel": 0.0}
         try:
             query_inv = f"""
                 SELECT regular, premium, diesel 
                 FROM inventarios_historico 
                 WHERE estacion_id = '{estacion_id_sel}' 
-                ORDER BY fecha DESC, turno DESC 
+                ORDER BY fecha DESC 
                 LIMIT 1;
             """
             df_inv = pd.read_sql(query_inv, conn)
@@ -218,7 +218,6 @@ def render(conn):
                 
                 cursor = conn.cursor()
                 try:
-                    # Verificar si ya existe un registro para esta estación, fecha y producto
                     check_query = f"""
                         SELECT id FROM programacion_cargas 
                         WHERE id_estacion = '{estacion_id_sel}' 
@@ -229,7 +228,6 @@ def render(conn):
                     existing = cursor.fetchone()
                     
                     if existing:
-                        # Actualizar volumen existente
                         update_query = f"""
                             UPDATE programacion_cargas 
                             SET volumen_programado = {volumen_pedido}, "user" = '{user_actual}'
@@ -239,7 +237,6 @@ def render(conn):
                         """
                         cursor.execute(update_query)
                     else:
-                        # Insertar nuevo registro con los campos exactos de la tabla
                         insert_query = f"""
                             INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado, "user")
                             VALUES ('{estacion_id_sel}', '{producto_pedido}', '{f_str}', {volumen_pedido}, '{user_actual}');
