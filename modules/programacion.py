@@ -147,7 +147,7 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar la VDP ponderada y factores: {e}")
 
-        # 8. Renderizar Matriz por Producto con título alineado exactamente en la esquina superior izquierda
+        # 8. Renderizar Matriz por Producto con título centrado exactamente en la celda superior izquierda
         productos = [
             ("regular", "<span style='color:#2ecc71; font-weight:bold;'>REGULAR</span>"), 
             ("premium", "<span style='color:#e67e22; font-weight:bold;'>PREMIUM</span>"), 
@@ -221,8 +221,8 @@ def render(conn):
                 columns=col_names_matrix
             )
 
-            # Título posicionado exactamente sobre la esquina superior izquierda (celda vacía de la tabla)
-            st.markdown(f"<div style='margin-bottom: -18px; position: relative; z-index: 2; padding-left: 4px;'>{prod_title_html}</div>", unsafe_allow_html=True)
+            # Contenedor con ancho fijo (170px) y texto centrado para posicionarse exactamente sobre la celda superior izquierda
+            st.markdown(f"<div style='margin-bottom: -18px; position: relative; z-index: 2; width: 170px; text-align: center;'>{prod_title_html}</div>", unsafe_allow_html=True)
             st.dataframe(df_matriz, width='stretch', use_container_width=True)
             st.markdown("<div style='margin-bottom: 25px;'></div>", unsafe_allow_html=True)
 
