@@ -59,13 +59,7 @@ def render(conn):
         # 3. Título Destacado con ID y Nombre de la Estación
         st.markdown("---")
         st.markdown(f"## ⛽ {estacion_id_sel} - {row_estacion['estacion_nombre']}")
-        st.markdown(f"""
-        | User / Programador | Plaza |
-        | :--- | :--- |
-        | **{row_estacion['programador']}** | **{row_estacion['plaza']}** |
-        """)
-        st.markdown("---")
-
+        
         # 4. Definir rango de fechas (14 días a partir de hoy)
         dias_proyeccion = 14
         hoy = date.today()
