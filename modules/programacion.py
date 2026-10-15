@@ -49,12 +49,27 @@ def render(conn):
         estacion_id_sel = selected_est_str.split(" - ")[0]
         row_estacion = df_filtrado_prog[df_filtrado_prog['id_estacion'] == estacion_id_sel].iloc[0]
 
-        # Obtener capacidades máximas por producto para la estación
+        # Obtener capacidades máximas por producto y verificar qué productos maneja realmente la estación
         capacidades = {}
+        productos_disponibles_estacion = set()
         df_caps = df_filtrado_prog[df_filtrado_prog['id_estacion'] == estacion_id_sel]
         for _, r in df_caps.iterrows():
-            p_key = str(r['producto']).lower()
-            capacidades[p_key] = float(r['capacidad_maxima']) if pd.notna(r['capacidad_maxima']) else 100000.0
+            p_raw = str(r['producto']).strip().lower()
+            cap = float(r['capacidad_maxima']) if pd.notna(r['capacidad_maxima']) else 0.0
+            
+            # Normalizar nombres de productos para asegurar coincidencia
+            if 'regular' in p_raw or 'magna' in p_raw:
+                p_key = 'regular'
+            elif 'premium' in p_raw:
+                p_key = 'premium'
+            elif 'diesel' in p_raw:
+                p_key = 'diesel'
+            else:
+                p_key = p_raw
+                
+            capacidades[p_key] = cap
+            if cap > 0:
+                productos_disponibles_estacion.add(p_key)
 
         # 3. Título Destacado con ID y Nombre de la Estación
         st.markdown("---")
@@ -151,14 +166,20 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar la VDP ponderada y factores: {e}")
 
-        # 8. Renderizar Matriz por Producto usando st.dataframe nativo (sin % de tanque final)
-        productos = [
+        # 8. Renderizar Matriz por Producto (solo si la estación maneja el producto / capacidad > 0)
+        productos_todos = [
             ("REGULAR", "regular", "<span style='color:#2ecc71;'>REGULAR</span>"), 
             ("PREMIUM", "premium", "<span style='color:#e67e22;'>PREMIUM</span>"), 
             ("DIESEL", "diesel", "<span style='color:#7f8c8d;'>DIESEL</span>")
         ]
 
-        for prod_label, prod_key, prod_title_html in productos:
+        productos_activos = []
+        for prod_label, prod_key, prod_title_html in productos_todos:
+            # Validar si el producto está en los disponibles o tiene capacidad mayor a 0
+            if prod_key in productos_disponibles_estacion or capacidades.get(prod_key, 0.0) > 0:
+                productos_activos.append((prod_label, prod_key, prod_title_html))
+
+        for prod_label, prod_key, prod_title_html in productos_activos:
             st.markdown(f"#### {prod_title_html}", unsafe_allow_html=True)
             
             inv_ini_row = []
@@ -236,22 +257,23 @@ def render(conn):
             st.dataframe(df_matriz, width='stretch')
             st.markdown("")
 
-        # 9. Sección Interactiva para Registrar / Actualizar Pedidos Masivos (con números puros)
+        # 9. Sección Interactiva para Registrar / Actualizar Pedidos Masivos (excluyendo productos inactivos)
         st.markdown("---")
         st.markdown("#### 📝 Editor de Programa de Carga (14 Días)")
         st.write("Modifica directamente los volúmenes de carga en la tabla inferior y haz clic en **Guardar Cambios**.")
 
         editor_data = {}
-        for col_n in col_names_editor:
-            f_obj = col_to_date[col_n]
-            f_str_k = f_obj.strftime("%Y-%m-%d")
-            editor_data[col_n] = [
-                float(cargas_guardadas.get((f_str_k, "regular"), 0.0)),
-                float(cargas_guardadas.get((f_str_k, "premium"), 0.0)),
-                float(cargas_guardadas.get((f_str_k, "diesel"), 0.0))
-            ]
+        editor_indices = []
+        for prod_label, prod_key, _ in productos_activos:
+            editor_indices.append(prod_label)
+            for col_n in col_names_editor:
+                f_obj = col_to_date[col_n]
+                f_str_k = f_obj.strftime("%Y-%m-%d")
+                if col_n not in editor_data:
+                    editor_data[col_n] = []
+                editor_data[col_n].append(float(cargas_guardadas.get((f_str_k, prod_key), 0.0)))
 
-        df_editor = pd.DataFrame(editor_data, index=["Regular", "Premium", "Diesel"])
+        df_editor = pd.DataFrame(editor_data, index=editor_indices)
 
         with st.form("form_editor_cargas"):
             edited_df = st.data_editor(
@@ -266,10 +288,10 @@ def render(conn):
                 user_actual = row_estacion['programador']
                 cursor = conn.cursor()
                 try:
-                    for prod_name in ["Regular", "Premium", "Diesel"]:
-                        p_str = prod_name.strip().lower()
+                    for prod_label, prod_key, _ in productos_activos:
+                        p_str = prod_key.strip().lower()
                         for col_n in col_names_editor:
-                            val_raw = edited_df.loc[prod_name, col_n]
+                            val_raw = edited_df.loc[prod_label, col_n]
                             volumen_val = float(val_raw) if pd.notna(val_raw) else 0.0
 
                             f_obj = col_to_date[col_n]
@@ -297,7 +319,7 @@ def render(conn):
                                 if volumen_val > 0:
                                     insert_query = f"""
                                         INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado, "user")
-                                        VALUES ('{estacion_id_sel}', '{prod_name}', '{f_str}', {volumen_val}, '{user_actual}');
+                                        VALUES ('{estacion_id_sel}', '{prod_label}', '{f_str}', {volumen_val}, '{user_actual}');
                                     """
                                     cursor.execute(insert_query)
                                     
