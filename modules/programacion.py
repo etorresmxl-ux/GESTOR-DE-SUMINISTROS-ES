@@ -194,7 +194,7 @@ def render(conn):
                 columns=col_names
             )
 
-            st.dataframe(df_matriz, use_container_width=True)
+            st.dataframe(df_matriz, width='stretch')
             st.markdown("")
 
         # 9. Sección para Registrar / Actualizar Pedidos (Programa de Carga)
@@ -237,5 +237,3 @@ def render(conn):
                               AND LOWER(producto) = '{p_str}';
                         """
                         cursor.execute(update_query)
-                    else:
-                        insert_query = f"""
