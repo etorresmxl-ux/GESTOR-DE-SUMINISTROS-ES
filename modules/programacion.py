@@ -135,7 +135,6 @@ def render(conn):
                         continue
                     
                     vdp_val = float(r['vdp_ponderada']) if pd.notna(r['vdp_ponderada']) else 0.0
-                    # Mapeo de índices de weekday() de Python (0=Lunes, ..., 6=Domingo) a las columnas de la vista
                     factores = {
                         0: float(r['fact_real_lun']) if pd.notna(r['fact_real_lun']) else 1.0,
                         1: float(r['fact_real_mar']) if pd.notna(r['fact_real_mar']) else 1.0,
@@ -184,7 +183,7 @@ def render(conn):
                 f_str_key = f_date.strftime("%Y-%m-%d")
                 carga = cargas_guardadas.get((f_str_key, prod_key), 0.0)
                 
-                # Venta proyectada ajustada con el factor del día de la semana correspondiente (weekday: 0=lun, ..., 6=dom)
+                # Venta proyectada ajustada con el factor del día de la semana correspondiente
                 dia_semana_idx = f_date.weekday()
                 factor_estacionario = factores_dia.get(dia_semana_idx, 1.0)
                 vta = vdp_base * factor_estacionario
@@ -286,4 +285,3 @@ def render(conn):
 
     except Exception as e:
         st.error(f"Error al generar la matriz MRP: {e}")
-```[cite: 19]
