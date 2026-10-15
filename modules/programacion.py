@@ -11,6 +11,16 @@ def render(conn):
         return
 
     try:
+        # Inyectar CSS personalizado para estilizar las celdas vacías de la esquina superior izquierda de las tablas
+        st.markdown("""
+            <style>
+                /* Estilo general para forzar colores en los elementos de las tablas si es necesario */
+                div[data-testid="stDataFrame"] {
+                    margin-bottom: 20px;
+                }
+            </style>
+        """, unsafe_allow_html=True)
+
         # 1. Consultar estaciones y programadores desde estaciones_detalle
         query_base = """
             SELECT DISTINCT 
@@ -69,17 +79,13 @@ def render(conn):
         dias_semana = ['lun.', 'mar.', 'mié.', 'jue.', 'vie.', 'sáb.', 'dom.']
         meses = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.']
         
-        # Formato para las tablas de productos: "ddd. dd-mmm"
         col_names_matrix = [f"{dias_semana[f.weekday()]} {f.day:02d}-{meses[f.month-1]}" for f in fechas]
-        
-        # Formato exclusivo para el editor: "dd-mmm"
         col_names_editor = [f"{f.day:02d}-{meses[f.month-1]}" for f in fechas]
 
-        # Mapeo inverso de columnas del editor a objetos date para guardar
         col_to_date = {col_names_editor[i]: fechas[i] for i in range(len(fechas))}
 
         # 5. Consultar Cargas Programadas guardadas en la base de datos para esta estación
-        cargas_guardadas = {} # {(fecha_str, producto): volumen}
+        cargas_guardadas = {} 
         try:
             query_cargas_db = f"""
                 SELECT fecha_programacion, producto, volumen_programado 
@@ -96,7 +102,7 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al cargar pedidos guardados: {e}")
 
-        # 6. Obtener Inventario Inicial actual del producto (Sin turno)
+        # 6. Obtener Inventario Inicial actual del producto
         inv_actuales = {"regular": 0.0, "premium": 0.0, "diesel": 0.0}
         try:
             query_inv = f"""
@@ -114,7 +120,7 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar inventarios históricos: {e}")
 
-        # 7. Obtener VDP Ponderada y Factores de Temporalidad por Día de la Semana
+        # 7. Obtener VDP Ponderada y Factores de Temporalidad
         vdp_data_dict = {} 
         try:
             query_vdp = f"""
@@ -151,14 +157,14 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar la VDP ponderada y factores: {e}")
 
-        # 8. Renderizar Matriz por Producto con el título colocado justo encima de cada tabla
+        # 8. Renderizar Matriz por Producto colocando el nombre del producto en la esquina superior izquierda (índice 0,0)
         productos = [
-            ("REGULAR", "regular", "<span style='color:#2ecc71;'>REGULAR</span>"), 
-            ("PREMIUM", "premium", "<span style='color:#e67e22;'>PREMIUM</span>"), 
-            ("DIESEL", "diesel", "<span style='color:#7f8c8d;'>DIESEL</span>")
+            ("regular", "<span style='color:#2ecc71; font-weight:bold;'>REGULAR</span>"), 
+            ("premium", "<span style='color:#e67e22; font-weight:bold;'>PREMIUM</span>"), 
+            ("diesel", "<span style='color:#7f8c8d; font-weight:bold;'>DIESEL</span>")
         ]
 
-        for prod_label, prod_key, prod_title_html in productos:
+        for prod_key, prod_title_html in productos:
             inv_ini_row = []
             espacio_disp_row = []
             carga_row = []
@@ -203,6 +209,7 @@ def render(conn):
                 ds_row.append(f"{ds:.1f} d")
                 pct_row.append(f"{pct:.1f}%")
 
+            # Usamos el título con formato HTML directamente en la esquina superior izquierda del índice de filas
             df_matriz = pd.DataFrame(
                 [
                     inv_ini_row,
@@ -214,7 +221,7 @@ def render(conn):
                     pct_row
                 ],
                 index=[
-                    "Inventario Inicial",
+                    prod_title_html,
                     "Espacio disponible",
                     "Programa (Carga)",
                     "Venta Proyectada",
@@ -225,10 +232,8 @@ def render(conn):
                 columns=col_names_matrix
             )
 
-            # Título colocado inmediatamente antes de la tabla para mantener la cercanía visual
-            st.markdown(f"#### {prod_title_html}", unsafe_allow_html=True)
-            st.dataframe(df_matriz, width='stretch')
-            st.markdown("<div style='margin-bottom: 25px;'></div>", unsafe_allow_html=True)
+            st.dataframe(df_matriz, width='stretch', use_container_width=True)
+            st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
 
         # 9. Sección Interactiva para Registrar / Actualizar Pedidos Masivos
         st.markdown("---")
