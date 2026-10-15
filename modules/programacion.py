@@ -204,15 +204,23 @@ def render(conn):
                 # Icono de alerta si el inventario final es menor a 5000
                 inv_fin_str = f"⚠️ {inv_fin:,.0f}" if inv_fin < 5000 else f"{inv_fin:,.0f}"
 
+                # Icono de semáforo para D/S (< 1 rojo, < 2 amarillo, >= 2 verde)
+                if ds < 1.0:
+                    ds_str = f"🔴 {ds:.1f} d"
+                elif ds < 2.0:
+                    ds_str = f"🟡 {ds:.1f} d"
+                else:
+                    ds_str = f"🟢 {ds:.1f} d"
+
                 inv_ini_row.append(f"{inv_ini:,.0f}")
                 espacio_disp_row.append(f"{espacio_disp:,.0f}")
                 carga_row.append(f"{carga:,.0f}" if carga > 0 else "-")
                 vta_row.append(f"{vta:,.0f}")
                 inv_fin_row.append(inv_fin_str)
-                ds_row.append(f"{ds:.1f} d")
+                ds_row.append(ds_str)
                 pct_row.append(f"{pct:.1f}%")
 
-            # Construcción de tabla HTML personalizada para soportar estilos y semáforos en celdas
+            # Construcción de tabla HTML personalizada para mostrar los datos de forma limpia
             html_table = "<div style='overflow-x:auto;'><table style='width:100%; border-collapse: collapse; font-size: 13px; font-family: sans-serif;'>"
             html_table += "<thead><tr style='background-color: #f0f2f6; color: #31333F; border-bottom: 2px solid #ddd;'>"
             html_table += "<th style='padding: 6px 10px; text-align: left; border: 1px solid #ddd; position: sticky; left: 0; background-color: #f0f2f6; z-index: 1;'>Métrica</th>"
@@ -221,27 +229,20 @@ def render(conn):
             html_table += "</tr></thead><tbody>"
 
             metrics = [
-                ("Inventario Inicial", inv_ini_row, None),
-                ("Espacio disponible", espacio_disp_row, None),
-                ("Programa (Carga)", carga_row, None),
-                ("Venta Proyectada", vta_row, None),
-                ("Inventario Final", inv_fin_row, None),
-                ("D/S (Final)", ds_row, "ds"),
-                ("% Tanque (Final)", pct_row, None)
+                ("Inventario Inicial", inv_ini_row),
+                ("Espacio disponible", espacio_disp_row),
+                ("Programa (Carga)", carga_row),
+                ("Venta Proyectada", vta_row),
+                ("Inventario Final", inv_fin_row),
+                ("D/S (Final)", ds_row),
+                ("% Tanque (Final)", pct_row)
             ]
 
-            for label, data_list, style_type in metrics:
+            for label, data_list in metrics:
                 html_table += "<tr>"
                 html_table += f"<td style='padding: 6px 10px; font-weight: bold; border: 1px solid #ddd; background-color: #f9f9f9; position: sticky; left: 0; z-index: 1;'>{label}</td>"
-                for idx, val_str in enumerate(data_list):
+                for val_str in data_list:
                     cell_style = "padding: 6px 10px; text-align: center; border: 1px solid #ddd;"
-                    if style_type == "ds":
-                        ds_val = ds_raws[idx]
-                        if ds_val < 1.0:
-                            cell_style += " background-color: #f8d7da; color: #721c24; font-weight: bold;"  # Rojo (menos de 1 día)
-                        elif ds_val < 2.0:
-                            cell_style += " background-color: #fff3cd; color: #856404; font-weight: bold;"  # Amarillo (menos de 2 días)
-                    
                     html_table += f"<td style='{cell_style}'>{val_str}</td>"
                 html_table += "</tr>"
             html_table += "</tbody></table></div>"
