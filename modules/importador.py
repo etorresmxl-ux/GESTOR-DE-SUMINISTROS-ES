@@ -127,8 +127,9 @@ def render(conn):
                 
                 if st.button("🚀 Procesar e Importar Ventas", key="btn_imp_ventas_csv"):
                     cursor = conn.cursor()
+                    # CORRECCIÓN: Cambiado de 'ventas_historicas' a 'ventas_historico'
                     sql_upsert_ventas = """
-                        INSERT INTO ventas_historicas (estacion_id, fecha, regular, premium, diesel)
+                        INSERT INTO ventas_historico (estacion_id, fecha, regular, premium, diesel)
                         VALUES (%s, %s, %s, %s, %s)
                         ON CONFLICT (estacion_id, fecha) 
                         DO UPDATE SET regular = EXCLUDED.regular,
