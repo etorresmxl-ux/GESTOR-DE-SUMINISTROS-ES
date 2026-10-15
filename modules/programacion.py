@@ -59,7 +59,13 @@ def render(conn):
         # 3. Título Destacado con ID y Nombre de la Estación
         st.markdown("---")
         st.markdown(f"## ⛽ {estacion_id_sel} - {row_estacion['estacion_nombre']}")
-        
+        st.markdown(f"""
+        | User / Programador | Plaza |
+        | :--- | :--- |
+        | **{row_estacion['programador']}** | **{row_estacion['plaza']}** |
+        """)
+        st.markdown("---")
+
         # 4. Definir rango de fechas (14 días a partir de hoy)
         dias_proyeccion = 14
         hoy = date.today()
@@ -134,6 +140,7 @@ def render(conn):
             st.markdown(f"#### ⛽ {prod_label}")
             
             inv_ini_row = []
+            espacio_disp_row = []
             carga_row = []
             vta_row = []
             inv_fin_row = []
@@ -151,6 +158,9 @@ def render(conn):
                 else:
                     inv_ini = inv_fin_prev
 
+                # Espacio disponible = Capacidad máxima - Inventario inicial del día
+                espacio_disp = cap_max - inv_ini
+
                 # Carga recuperada de la base de datos para esta fecha y producto
                 f_str_key = f_date.strftime("%Y-%m-%d")
                 carga = cargas_guardadas.get((f_str_key, prod_key), 0.0)
@@ -163,6 +173,7 @@ def render(conn):
                 pct = (inv_fin / cap_max) * 100 if cap_max > 0 else 0.0
 
                 inv_ini_row.append(f"{inv_ini:,.0f}")
+                espacio_disp_row.append(f"{espacio_disp:,.0f}")
                 carga_row.append(f"{carga:,.0f}" if carga > 0 else "-")
                 vta_row.append(f"{vta:,.0f}")
                 inv_fin_row.append(f"{inv_fin:,.0f}")
@@ -172,6 +183,7 @@ def render(conn):
             df_matriz = pd.DataFrame(
                 [
                     inv_ini_row,
+                    espacio_disp_row,
                     carga_row,
                     vta_row,
                     inv_fin_row,
@@ -180,6 +192,7 @@ def render(conn):
                 ],
                 index=[
                     "Inventario Inicial",
+                    "Espacio disponible",
                     "Programa (Carga)",
                     "Venta Proyectada",
                     "Inventario Final",
