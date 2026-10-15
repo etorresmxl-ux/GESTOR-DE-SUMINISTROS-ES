@@ -153,7 +153,7 @@ def render(conn):
         ]
 
         for prod_label, prod_key, prod_title_html in productos:
-            st.markdown(f"#### ⛽ {prod_title_html}", unsafe_allow_html=True)
+            st.markdown(f"#### {prod_title_html}", unsafe_allow_html=True)
             
             inv_ini_row = []
             espacio_disp_row = []
