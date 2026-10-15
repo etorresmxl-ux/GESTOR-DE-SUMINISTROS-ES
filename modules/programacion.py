@@ -49,7 +49,7 @@ def render(conn):
         estacion_id_sel = selected_est_str.split(" - ")[0]
         row_estacion = df_filtrado_prog[df_filtrado_prog['id_estacion'] == estacion_id_sel].iloc[0]
 
-        # Obtener capacidades máximas por producto para la estación
+        # Obtener capacidades máximas por producto para la estación desde estaciones_detalle
         capacidades = {}
         df_caps = df_filtrado_prog[df_filtrado_prog['id_estacion'] == estacion_id_sel]
         for _, r in df_caps.iterrows():
