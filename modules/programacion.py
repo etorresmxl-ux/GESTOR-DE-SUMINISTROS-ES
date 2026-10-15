@@ -56,7 +56,7 @@ def render(conn):
             p_key = str(r['producto']).lower()
             capacidades[p_key] = float(r['capacidad_maxima']) if pd.notna(r['capacidad_maxima']) else 100000.0
 
-        # 3. Título Destacado con ID y Nombre de la Estación (Sin tabla de usuario/plaza)
+        # 3. Título Destacado con ID y Nombre de la Estación
         st.markdown("---")
         st.markdown(f"## ⛽ {estacion_id_sel} - {row_estacion['estacion_nombre']}")
         st.markdown("---")
@@ -69,10 +69,10 @@ def render(conn):
         dias_semana = ['lun.', 'mar.', 'mié.', 'jue.', 'vie.', 'sáb.', 'dom.']
         meses = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.']
         
-        # Formato para las tablas de productos: "ddd. dd-mmm" (ej. jue. 15-oct.)
+        # Formato para las tablas de productos: "ddd. dd-mmm"
         col_names_matrix = [f"{dias_semana[f.weekday()]} {f.day:02d}-{meses[f.month-1]}" for f in fechas]
         
-        # Formato exclusivo para el editor: "dd-mmm" (ej. 15-oct.)
+        # Formato exclusivo para el editor: "dd-mmm"
         col_names_editor = [f"{f.day:02d}-{meses[f.month-1]}" for f in fechas]
 
         # Mapeo inverso de columnas del editor a objetos date para guardar
@@ -151,7 +151,7 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar la VDP ponderada y factores: {e}")
 
-        # 8. Renderizar Matriz por Producto (con col_names_matrix que incluye el día de la semana)
+        # 8. Renderizar Matriz por Producto
         productos = [
             ("REGULAR", "regular", "<span style='color:#2ecc71;'>REGULAR</span>"), 
             ("PREMIUM", "premium", "<span style='color:#e67e22;'>PREMIUM</span>"), 
@@ -230,7 +230,7 @@ def render(conn):
             st.dataframe(df_matriz, width='stretch')
             st.markdown("")
 
-        # 9. Sección Interactiva para Registrar / Actualizar Pedidos Masivos (con col_names_editor que usa solo dd-mmm)
+        # 9. Sección Interactiva para Registrar / Actualizar Pedidos Masivos (con números puros)
         st.markdown("---")
         st.markdown("#### 📝 Editor de Programa de Carga (14 Días)")
         st.write("Modifica directamente los volúmenes de carga en la tabla inferior y haz clic en **Guardar Cambios**.")
@@ -240,9 +240,9 @@ def render(conn):
             f_obj = col_to_date[col_n]
             f_str_k = f_obj.strftime("%Y-%m-%d")
             editor_data[col_n] = [
-                f"{cargas_guardadas.get((f_str_k, 'regular'), 0.0):,.0f}",
-                f"{cargas_guardadas.get((f_str_k, 'premium'), 0.0):,.0f}",
-                f"{cargas_guardadas.get((f_str_k, 'diesel'), 0.0):,.0f}"
+                float(cargas_guardadas.get((f_str_k, "regular"), 0.0)),
+                float(cargas_guardadas.get((f_str_k, "premium"), 0.0)),
+                float(cargas_guardadas.get((f_str_k, "diesel"), 0.0))
             ]
 
         df_editor = pd.DataFrame(editor_data, index=["Regular", "Premium", "Diesel"])
@@ -264,12 +264,7 @@ def render(conn):
                         p_str = prod_name.strip().lower()
                         for col_n in col_names_editor:
                             val_raw = edited_df.loc[prod_name, col_n]
-                            
-                            if isinstance(val_raw, str):
-                                val_clean = val_raw.replace(',', '').strip()
-                                volumen_val = float(val_clean) if val_clean and val_clean != '-' else 0.0
-                            else:
-                                volumen_val = float(val_raw) if pd.notna(val_raw) else 0.0
+                            volumen_val = float(val_raw) if pd.notna(val_raw) else 0.0
 
                             f_obj = col_to_date[col_n]
                             f_str = f_obj.strftime("%Y-%m-%d")
