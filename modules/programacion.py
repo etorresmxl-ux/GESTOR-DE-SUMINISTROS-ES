@@ -11,16 +11,6 @@ def render(conn):
         return
 
     try:
-        # Inyectar CSS personalizado para estilizar las celdas vacías de la esquina superior izquierda de las tablas
-        st.markdown("""
-            <style>
-                /* Estilo general para forzar colores en los elementos de las tablas si es necesario */
-                div[data-testid="stDataFrame"] {
-                    margin-bottom: 20px;
-                }
-            </style>
-        """, unsafe_allow_html=True)
-
         # 1. Consultar estaciones y programadores desde estaciones_detalle
         query_base = """
             SELECT DISTINCT 
@@ -157,7 +147,7 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar la VDP ponderada y factores: {e}")
 
-        # 8. Renderizar Matriz por Producto colocando el nombre del producto en la esquina superior izquierda (índice 0,0)
+        # 8. Renderizar Matriz por Producto con título alineado exactamente en la esquina superior izquierda
         productos = [
             ("regular", "<span style='color:#2ecc71; font-weight:bold;'>REGULAR</span>"), 
             ("premium", "<span style='color:#e67e22; font-weight:bold;'>PREMIUM</span>"), 
@@ -209,7 +199,6 @@ def render(conn):
                 ds_row.append(f"{ds:.1f} d")
                 pct_row.append(f"{pct:.1f}%")
 
-            # Usamos el título con formato HTML directamente en la esquina superior izquierda del índice de filas
             df_matriz = pd.DataFrame(
                 [
                     inv_ini_row,
@@ -221,7 +210,7 @@ def render(conn):
                     pct_row
                 ],
                 index=[
-                    prod_title_html,
+                    "Inventario Inicial",
                     "Espacio disponible",
                     "Programa (Carga)",
                     "Venta Proyectada",
@@ -232,8 +221,10 @@ def render(conn):
                 columns=col_names_matrix
             )
 
+            # Título posicionado exactamente sobre la esquina superior izquierda (celda vacía de la tabla)
+            st.markdown(f"<div style='margin-bottom: -18px; position: relative; z-index: 2; padding-left: 4px;'>{prod_title_html}</div>", unsafe_allow_html=True)
             st.dataframe(df_matriz, width='stretch', use_container_width=True)
-            st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
+            st.markdown("<div style='margin-bottom: 25px;'></div>", unsafe_allow_html=True)
 
         # 9. Sección Interactiva para Registrar / Actualizar Pedidos Masivos
         st.markdown("---")
