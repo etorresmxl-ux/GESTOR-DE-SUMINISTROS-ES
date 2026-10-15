@@ -56,12 +56,13 @@ def render(conn):
             p_key = str(r['producto']).lower()
             capacidades[p_key] = float(r['capacidad_maxima']) if pd.notna(r['capacidad_maxima']) else 100000.0
 
-        # 3. Cabecera de Información de la Estación
+        # 3. Título Destacado con ID y Nombre de la Estación
         st.markdown("---")
+        st.markdown(f"## ⛽ {estacion_id_sel} - {row_estacion['estacion_nombre']}")
         st.markdown(f"""
-        | User | ID Estación | Destino (TAD) | Proveedor | Estación | Plaza |
-        | :--- | :--- | :--- | :--- | :--- | :--- |
-        | **{row_estacion['programador']}** | **{estacion_id_sel}** | **{row_estacion['proveedor']}** | **{row_estacion.get('tad', 'N/A')}** | **{row_estacion['estacion_nombre']}** | **{row_estacion['plaza']}** |
+        | User / Programador | Plaza |
+        | :--- | :--- |
+        | **{row_estacion['programador']}** | **{row_estacion['plaza']}** |
         """)
         st.markdown("---")
 
