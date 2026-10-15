@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 def render(conn):
     st.markdown("### 🚛 Matriz de Programación y Suministro (MRP)")
-    st.write("Planificación multicierre a 14 días por estación y producto con registro de pedidos.")
+    st.write("Planificación multicierre a 14 días por estación y producto con edición interactiva directa en celdas.")
 
     if conn is None:
         st.error("No hay conexión a la base de datos.")
@@ -72,9 +72,12 @@ def render(conn):
         
         dias_semana = ['lun.', 'mar.', 'mié.', 'jue.', 'vie.', 'sáb.', 'dom.']
         meses = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.']
+        
+        # Mapeo de columnas de fecha con objetos fecha reales para guardar después
         col_names = [f"{dias_semana[f.weekday()]} {f.day:02d}-{meses[f.month-1]}" for f in fechas]
+        map_col_to_date = {col_names[i]: fechas[i] for i in range(dias_proyeccion)}
 
-        # 5. Consultar Cargas Programadas guardadas en la base de datos para esta estación
+        # 5. Consultar Cargas Programadas guardadas en la base de datos
         cargas_guardadas = {} # {(fecha_str, producto): volumen}
         try:
             query_cargas_db = f"""
@@ -92,7 +95,7 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al cargar pedidos guardados: {e}")
 
-        # 6. Obtener Inventario Inicial actual del producto (Sin turno)
+        # 6. Obtener Inventario Inicial actual del producto
         inv_actuales = {"regular": 0.0, "premium": 0.0, "diesel": 0.0}
         try:
             query_inv = f"""
@@ -132,8 +135,11 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar la VDP ponderada: {e}")
 
-        # 8. Renderizar Matriz por Producto
+        # 8. Renderizar Matrices Interactivas por Producto
         productos = [("REGULAR", "regular"), ("PREMIUM", "premium"), ("DIESEL", "diesel")]
+        
+        # Diccionario para almacenar los data_editors y sus cambios si se desea guardar en lote
+        updated_dataframes = {}
 
         for prod_label, prod_key in productos:
             st.markdown(f"#### ⛽ {prod_label}")
@@ -156,7 +162,6 @@ def render(conn):
                 else:
                     inv_ini = inv_fin_prev
 
-                # Carga recuperada de la base de datos para esta fecha y producto
                 f_str_key = f_date.strftime("%Y-%m-%d")
                 carga = cargas_guardadas.get((f_str_key, prod_key), 0.0)
                 
@@ -167,13 +172,14 @@ def render(conn):
                 ds = (inv_fin / vta) if vta > 0 else 0.0
                 pct = (inv_fin / cap_max) * 100 if cap_max > 0 else 0.0
 
-                inv_ini_row.append(f"{inv_ini:,.0f}")
-                carga_row.append(f"{carga:,.0f}" if carga > 0 else "-")
-                vta_row.append(f"{vta:,.0f}")
-                inv_fin_row.append(f"{inv_fin:,.0f}")
+                inv_ini_row.append(inv_ini)
+                carga_row.append(carga)
+                vta_row.append(vta)
+                inv_fin_row.append(inv_fin)
                 ds_row.append(f"{ds:.1f} d")
                 pct_row.append(f"{pct:.1f}%")
 
+            # Creamos el DataFrame base (con números flotantes/enteros para que el editor los maneje bien)
             df_matriz = pd.DataFrame(
                 [
                     inv_ini_row,
@@ -194,64 +200,86 @@ def render(conn):
                 columns=col_names
             )
 
-            st.dataframe(df_matriz, width='stretch')
+            # Configuramos qué filas son editables (solo 'Programa (Carga)')
+            # Usamos st.data_editor permitiendo editar celdas de la fila de programa
+            edited_df = st.data_editor(
+                df_matriz, 
+                width='stretch',
+                key=f"editor_{estacion_id_sel}_{prod_key}",
+                disabled=["Inventario Inicial", "Venta Proyectada", "Inventario Final", "D/S (Final)", "% Tanque (Final)"]
+            )
+            
+            updated_dataframes[prod_key] = edited_df
             st.markdown("")
 
-        # 9. Sección para Registrar / Actualizar Pedidos (Programa de Carga)
+        # 9. Botón Global para Guardar los Cambios Realizados en las Tablas
         st.markdown("---")
-        st.markdown("#### 📝 Registrar o Modificar Pedido (Carga)")
-        
-        with st.form("form_registro_carga"):
-            c_f1, c_f2, c_f3 = st.columns(3)
-            with c_f1:
-                fecha_pedido = st.date_input("Fecha de Carga", date.today())
-            with c_f2:
-                producto_pedido = st.selectbox("Producto", ["Regular", "Premium", "Diesel"])
-            with c_f3:
-                volumen_pedido = st.number_input("Volumen a Programar (Litros)", min_value=0.0, step=1000.0, format="%.2f")
-                
-            submitted = st.form_submit_button("Guardar Pedido")
-            
-            if submitted:
-                f_str = fecha_pedido.strftime("%Y-%m-%d")
-                p_str = producto_pedido.strip().lower()
-                user_actual = row_estacion['programador']
-                
-                cursor = conn.cursor()
-                try:
-                    check_query = f"""
-                        SELECT id FROM programacion_cargas 
-                        WHERE id_estacion = '{estacion_id_sel}' 
-                          AND fecha_programacion = '{f_str}' 
-                          AND LOWER(producto) = '{p_str}';
-                    """
-                    cursor.execute(check_query)
-                    existing = cursor.fetchone()
+        if st.button("💾 Guardar Cambios en Programación", type="primary"):
+            user_actual = row_estacion['programador']
+            cursor = conn.cursor()
+            try:
+                for prod_key, df_edited in updated_dataframes.items():
+                    # Extraemos la fila de "Programa (Carga)"
+                    fila_carga = df_edited.loc["Programa (Carga)"]
                     
-                    if existing:
-                        update_query = f"""
-                            UPDATE programacion_cargas 
-                            SET volumen_programado = {volumen_pedido}, "user" = '{user_actual}'
+                    for col_name, val in fila_carga.items():
+                        f_date = map_col_to_date[col_name]
+                        f_str = f_date.strftime("%Y-%m-%d")
+                        
+                        try:
+                            volumen_pedido = float(val) if pd.notna(val) else 0.0
+                        except:
+                            volumen_pedido = 0.0
+
+                        # Nombre legible del producto para guardar en BD
+                        prod_nombre_db = prod_key.capitalize()
+
+                        # Verificamos si ya existe un registro para esta fecha y producto
+                        check_query = f"""
+                            SELECT id FROM programacion_cargas 
                             WHERE id_estacion = '{estacion_id_sel}' 
                               AND fecha_programacion = '{f_str}' 
-                              AND LOWER(producto) = '{p_str}';
+                              AND LOWER(producto) = '{prod_key}';
                         """
-                        cursor.execute(update_query)
-                    else:
-                        insert_query = f"""
-                            INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado, "user")
-                            VALUES ('{estacion_id_sel}', '{producto_pedido}', '{f_str}', {volumen_pedido}, '{user_actual}');
-                        """
-                        cursor.execute(insert_query)
-                        
-                    conn.commit()
+                        cursor.execute(check_query)
+                        existing = cursor.fetchone()
+
+                        if existing:
+                            if volumen_pedido > 0:
+                                update_query = f"""
+                                    UPDATE programacion_cargas 
+                                    SET volumen_programado = {volumen_pedido}, "user" = '{user_actual}'
+                                    WHERE id_estacion = '{estacion_id_sel}' 
+                                      AND fecha_programacion = '{f_str}' 
+                                      AND LOWER(producto) = '{prod_key}';
+                                """
+                                cursor.execute(update_query)
+                            else:
+                                # Si el volumen se puso en 0 o vacío, opcionalmente podemos eliminarlo o dejarlo en 0
+                                delete_query = f"""
+                                    DELETE FROM programacion_cargas 
+                                    WHERE id_estacion = '{estacion_id_sel}' 
+                                      AND fecha_programacion = '{f_str}' 
+                                      AND LOWER(producto) = '{prod_key}';
+                                """
+                                cursor.execute(delete_query)
+                        else:
+                            if volumen_pedido > 0:
+                                insert_query = f"""
+                                    INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado, "user")
+                                    VALUES ('{estacion_id_sel}', '{prod_nombre_db}', '{f_str}', {volumen_pedido}, '{user_actual}');
+                                """
+                                cursor.execute(insert_query)
+
+                conn.commit()
+                cursor.close()
+                st.success("¡Todos los cambios en el programa de cargas se han guardado y actualizado correctamente!")
+                st.rerun()
+            except Exception as db_err:
+                conn.rollback()
+                if cursor:
                     cursor.close()
-                    st.success(f"¡Pedido de {volumen_pedido:,.0f} L de {producto_pedido} guardado correctamente para el {f_str}!")
-                    st.rerun()
-                except Exception as db_err:
-                    conn.rollback()
-                    cursor.close()
-                    st.error(f"Error al guardar el pedido en la base de datos: {db_err}")
+                st.error(f"Error al actualizar los pedidos en la base de datos: {db_err}")
 
     except Exception as e:
-        st.error(f"Error al generar la matriz MRP: {e}")
+        st.error(f"Error al generar la matriz MRP interactiva: {e}")
