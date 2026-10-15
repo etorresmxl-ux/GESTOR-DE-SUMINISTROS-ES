@@ -73,7 +73,6 @@ def render(conn):
         dias_semana = ['lun.', 'mar.', 'mié.', 'jue.', 'vie.', 'sáb.', 'dom.']
         meses = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.']
         
-        # Mapeo de columnas de fecha con objetos fecha reales para guardar después
         col_names = [f"{dias_semana[f.weekday()]} {f.day:02d}-{meses[f.month-1]}" for f in fechas]
         map_col_to_date = {col_names[i]: fechas[i] for i in range(dias_proyeccion)}
 
@@ -135,10 +134,8 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar la VDP ponderada: {e}")
 
-        # 8. Renderizar Matrices Interactivas por Producto
+        # 8. Renderizar Matrices por Producto
         productos = [("REGULAR", "regular"), ("PREMIUM", "premium"), ("DIESEL", "diesel")]
-        
-        # Diccionario para almacenar los data_editors y sus cambios si se desea guardar en lote
         updated_dataframes = {}
 
         for prod_label, prod_key in productos:
@@ -176,11 +173,11 @@ def render(conn):
                 carga_row.append(carga)
                 vta_row.append(vta)
                 inv_fin_row.append(inv_fin)
-                ds_row.append(f"{ds:.1f} d")
-                pct_row.append(f"{pct:.1f}%")
+                ds_row.append(ds)
+                pct_row.append(pct)
 
-            # Creamos el DataFrame base (con números flotantes/enteros para que el editor los maneje bien)
-            df_matriz = pd.DataFrame(
+            # DataFrame numérico base para calcular
+            df_raw = pd.DataFrame(
                 [
                     inv_ini_row,
                     carga_row,
@@ -200,41 +197,46 @@ def render(conn):
                 columns=col_names
             )
 
-            # Configuramos qué filas son editables (solo 'Programa (Carga)')
-            # Usamos st.data_editor permitiendo editar celdas de la fila de programa
-            edited_df = st.data_editor(
-                df_matriz, 
+            # Transponemos para que las fechas sean filas y los conceptos columnas (así st.data_editor funciona perfectamente)
+            df_transposed = df_raw.T
+            
+            # Configuramos el editor interactivo permitiendo editar solamente la columna de Carga
+            edited_transposed = st.data_editor(
+                df_transposed,
                 width='stretch',
                 key=f"editor_{estacion_id_sel}_{prod_key}",
-                disabled=["Inventario Inicial", "Venta Proyectada", "Inventario Final", "D/S (Final)", "% Tanque (Final)"]
+                disabled=["Inventario Inicial", "Venta Proyectada", "Inventario Final", "D/S (Final)", "% Tanque (Final)"],
+                column_config={
+                    "Inventario Inicial": st.column_config.NumberColumn(format="%,.0f"),
+                    "Programa (Carga)": st.column_config.NumberColumn(format="%,.0f", step=1000.0, min_value=0.0),
+                    "Venta Proyectada": st.column_config.NumberColumn(format="%,.0f"),
+                    "Inventario Final": st.column_config.NumberColumn(format="%,.0f"),
+                    "D/S (Final)": st.column_config.NumberColumn(format="%.1f d"),
+                    "% Tanque (Final)": st.column_config.NumberColumn(format="%.1f%%")
+                }
             )
             
-            updated_dataframes[prod_key] = edited_df
+            updated_dataframes[prod_key] = edited_transposed
             st.markdown("")
 
-        # 9. Botón Global para Guardar los Cambios Realizados en las Tablas
+        # 9. Botón Global para Guardar los Cambios Realizados
         st.markdown("---")
         if st.button("💾 Guardar Cambios en Programación", type="primary"):
             user_actual = row_estacion['programador']
             cursor = conn.cursor()
             try:
                 for prod_key, df_edited in updated_dataframes.items():
-                    # Extraemos la fila de "Programa (Carga)"
-                    fila_carga = df_edited.loc["Programa (Carga)"]
-                    
-                    for col_name, val in fila_carga.items():
+                    for col_name, row_data in df_edited.iterrows():
                         f_date = map_col_to_date[col_name]
                         f_str = f_date.strftime("%Y-%m-%d")
                         
                         try:
-                            volumen_pedido = float(val) if pd.notna(val) else 0.0
+                            volumen_pedido = float(row_data["Programa (Carga)"]) if pd.notna(row_data["Programa (Carga)"]) else 0.0
                         except:
                             volumen_pedido = 0.0
 
-                        # Nombre legible del producto para guardar en BD
                         prod_nombre_db = prod_key.capitalize()
 
-                        # Verificamos si ya existe un registro para esta fecha y producto
                         check_query = f"""
                             SELECT id FROM programacion_cargas 
                             WHERE id_estacion = '{estacion_id_sel}' 
@@ -255,7 +257,6 @@ def render(conn):
                                 """
                                 cursor.execute(update_query)
                             else:
-                                # Si el volumen se puso en 0 o vacío, opcionalmente podemos eliminarlo o dejarlo en 0
                                 delete_query = f"""
                                     DELETE FROM programacion_cargas 
                                     WHERE id_estacion = '{estacion_id_sel}' 
