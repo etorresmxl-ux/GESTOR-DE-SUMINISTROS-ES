@@ -57,7 +57,6 @@ def render(conn):
             p_raw = str(r['producto']).strip().lower()
             cap = float(r['capacidad_maxima']) if pd.notna(r['capacidad_maxima']) else 0.0
             
-            # Normalizar nombres de productos para asegurar coincidencia
             if 'regular' in p_raw or 'magna' in p_raw:
                 p_key = 'regular'
             elif 'premium' in p_raw:
@@ -166,7 +165,7 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar la VDP ponderada y factores: {e}")
 
-        # 8. Renderizar Matriz por Producto (solo si la estación maneja el producto / capacidad > 0)
+        # 8. Renderizar Matriz por Producto (excluyendo diésel si no aplica)
         productos_todos = [
             ("REGULAR", "regular", "<span style='color:#2ecc71;'>REGULAR</span>"), 
             ("PREMIUM", "premium", "<span style='color:#e67e22;'>PREMIUM</span>"), 
@@ -175,9 +174,11 @@ def render(conn):
 
         productos_activos = []
         for prod_label, prod_key, prod_title_html in productos_todos:
-            # Validar si el producto está en los disponibles o tiene capacidad mayor a 0
             if prod_key in productos_disponibles_estacion or capacidades.get(prod_key, 0.0) > 0:
                 productos_activos.append((prod_label, prod_key, prod_title_html))
+
+        # Estructura temporal para validar sobrecupos en el editor inferior
+        espacios_disponibles_dict = {} # {(prod_key, fecha_str): espacio_disp}
 
         for prod_label, prod_key, prod_title_html in productos_activos:
             st.markdown(f"#### {prod_title_html}", unsafe_allow_html=True)
@@ -205,6 +206,10 @@ def render(conn):
 
                 espacio_disp = cap_max - inv_ini
                 f_str_key = f_date.strftime("%Y-%m-%d")
+                
+                # Guardar espacio disponible para validación en el editor
+                espacios_disponibles_dict[(prod_key, f_str_key)] = espacio_disp
+
                 carga = cargas_guardadas.get((f_str_key, prod_key), 0.0)
                 
                 dia_semana_idx = f_date.weekday()
@@ -216,8 +221,17 @@ def render(conn):
 
                 ds = (inv_fin / vta) if vta > 0 else 0.0
 
-                # Alerta ⚠️ si el inventario final es menor a 5000
+                # Alertas visuales ⚠️
                 inv_fin_str = f"⚠️ {inv_fin:,.0f}" if inv_fin < 5000 else f"{inv_fin:,.0f}"
+                
+                # Advertencia en carga si supera el espacio disponible del tanque
+                if carga > 0:
+                    if carga > espacio_disp:
+                        carga_row.append(f"⚠️ {carga:,.0f}")
+                    else:
+                        carga_row.append(f"{carga:,.0f}")
+                else:
+                    carga_row.append("-")
 
                 # Círculos de semáforo para D/S (< 1 rojo, < 2 amarillo, >= 2 verde)
                 if ds < 1.0:
@@ -229,7 +243,6 @@ def render(conn):
 
                 inv_ini_row.append(f"{inv_ini:,.0f}")
                 espacio_disp_row.append(f"{espacio_disp:,.0f}")
-                carga_row.append(f"{carga:,.0f}" if carga > 0 else "-")
                 vta_row.append(f"{vta:,.0f}")
                 inv_fin_row.append(inv_fin_str)
                 ds_row.append(ds_str)
@@ -257,7 +270,7 @@ def render(conn):
             st.dataframe(df_matriz, width='stretch')
             st.markdown("")
 
-        # 9. Sección Interactiva para Registrar / Actualizar Pedidos Masivos (excluyendo productos inactivos)
+        # 9. Sección Interactiva para Registrar / Actualizar Pedidos Masivos
         st.markdown("---")
         st.markdown("#### 📝 Editor de Programa de Carga (14 Días)")
         st.write("Modifica directamente los volúmenes de carga en la tabla inferior y haz clic en **Guardar Cambios**.")
@@ -287,6 +300,8 @@ def render(conn):
             if submitted_editor:
                 user_actual = row_estacion['programador']
                 cursor = conn.cursor()
+                hay_sobrecupo = False
+                
                 try:
                     for prod_label, prod_key, _ in productos_activos:
                         p_str = prod_key.strip().lower()
@@ -297,6 +312,11 @@ def render(conn):
                             f_obj = col_to_date[col_n]
                             f_str = f_obj.strftime("%Y-%m-%d")
                             
+                            # Validar si el volumen programado excede el espacio disponible estimado
+                            espacio_disponible_actual = espacios_disponibles_dict.get((prod_key, f_str), 100000.0)
+                            if volumen_val > espacio_disponible_actual and volumen_val > 0:
+                                hay_sobrecupo = True
+
                             check_query = f"""
                                 SELECT id FROM programacion_cargas 
                                 WHERE id_estacion = '{estacion_id_sel}' 
@@ -325,7 +345,11 @@ def render(conn):
                                     
                     conn.commit()
                     cursor.close()
-                    st.success("¡Programa de cargas actualizado correctamente en todas las fechas!")
+                    
+                    if hay_sobrecupo:
+                        st.warning("⚠️ Cambios guardados, pero atención: **Uno o más pedidos superan el espacio disponible** del tanque en su respectiva fecha.")
+                    else:
+                        st.success("¡Programa de cargas actualizado correctamente en todas las fechas!")
                     st.rerun()
                 except Exception as db_err:
                     conn.rollback()
