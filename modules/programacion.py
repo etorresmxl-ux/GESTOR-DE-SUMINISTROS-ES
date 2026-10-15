@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 def render(conn):
     st.markdown("### 🚛 Matriz de Programación y Suministro (MRP)")
-    st.write("Planificación multicierre a 14 días por estación y producto con registro de pedidos.")
+    st.write("Planificación multicierre a 14 días por estación y producto con registro masivo de pedidos.")
 
     if conn is None:
         st.error("No hay conexión a la base de datos.")
@@ -59,7 +59,13 @@ def render(conn):
         # 3. Título Destacado con ID y Nombre de la Estación
         st.markdown("---")
         st.markdown(f"## ⛽ {estacion_id_sel} - {row_estacion['estacion_nombre']}")
-        
+        st.markdown(f"""
+        | User / Programador | Plaza |
+        | :--- | :--- |
+        | **{row_estacion['programador']}** | **{row_estacion['plaza']}** |
+        """)
+        st.markdown("---")
+
         # 4. Definir rango de fechas (14 días a partir de hoy)
         dias_proyeccion = 14
         hoy = date.today()
@@ -68,6 +74,9 @@ def render(conn):
         dias_semana = ['lun.', 'mar.', 'mié.', 'jue.', 'vie.', 'sáb.', 'dom.']
         meses = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.']
         col_names = [f"{dias_semana[f.weekday()]} {f.day:02d}-{meses[f.month-1]}" for f in fechas]
+
+        # Mapeo inverso de columnas a objetos date para guardar
+        col_to_date = {col_names[i]: fechas[i] for i in range(len(fechas))}
 
         # 5. Consultar Cargas Programadas guardadas en la base de datos para esta estación
         cargas_guardadas = {} # {(fecha_str, producto): volumen}
@@ -106,7 +115,7 @@ def render(conn):
             st.warning(f"Aviso al consultar inventarios históricos: {e}")
 
         # 7. Obtener VDP Ponderada y Factores de Temporalidad por Día de la Semana
-        vdp_data_dict = {} # {prod_key: {'vdp': val, 'factores': {0: f_lun, 1: f_mar, ...}}}
+        vdp_data_dict = {} 
         try:
             query_vdp = f"""
                 SELECT producto, vdp_ponderada, 
@@ -170,14 +179,10 @@ def render(conn):
                 else:
                     inv_ini = inv_fin_prev
 
-                # Espacio disponible = Capacidad máxima - Inventario inicial del día
                 espacio_disp = cap_max - inv_ini
-
-                # Carga recuperada de la base de datos para esta fecha y producto
                 f_str_key = f_date.strftime("%Y-%m-%d")
                 carga = cargas_guardadas.get((f_str_key, prod_key), 0.0)
                 
-                # Venta proyectada ajustada con el factor del día de la semana correspondiente
                 dia_semana_idx = f_date.weekday()
                 factor_estacionario = factores_dia.get(dia_semana_idx, 1.0)
                 vta = vdp_base * factor_estacionario
@@ -221,61 +226,79 @@ def render(conn):
             st.dataframe(df_matriz, width='stretch')
             st.markdown("")
 
-        # 9. Sección para Registrar / Actualizar Pedidos (Programa de Carga)
+        # 9. Sección Interactiva para Registrar / Actualizar Pedidos Masivos
         st.markdown("---")
-        st.markdown("#### 📝 Registrar o Modificar Pedido (Carga)")
-        
-        with st.form("form_registro_carga"):
-            c_f1, c_f2, c_f3 = st.columns(3)
-            with c_f1:
-                fecha_pedido = st.date_input("Fecha de Carga", date.today())
-            with c_f2:
-                producto_pedido = st.selectbox("Producto", ["Regular", "Premium", "Diesel"])
-            with c_f3:
-                volumen_pedido = st.number_input("Volumen a Programar (Litros)", min_value=0.0, step=1000.0, format="%.2f")
-                
-            submitted = st.form_submit_button("Guardar Pedido")
+        st.markdown("#### 📝 Editor de Programa de Carga (14 Días)")
+        st.write("Modifica directamente los volúmenes de carga en la tabla inferior y haz clic en **Guardar Cambios**.")
+
+        # Construir DataFrame para el editor (3 filas: Regular, Premium, Diesel; 14 columnas de fechas)
+        editor_data = {}
+        for col_n in col_names:
+            f_obj = col_to_date[col_n]
+            f_str_k = f_obj.strftime("%Y-%m-%d")
+            editor_data[col_n] = [
+                float(cargas_guardadas.get((f_str_k, "regular"), 0.0)),
+                float(cargas_guardadas.get((f_str_k, "premium"), 0.0)),
+                float(cargas_guardadas.get((f_str_k, "diesel"), 0.0))
+            ]
+
+        df_editor = pd.DataFrame(editor_data, index=["Regular", "Premium", "Diesel"])
+
+        with st.form("form_editor_cargas"):
+            edited_df = st.data_editor(
+                df_editor, 
+                width='stretch',
+                key="editor_matriz_cargas"
+            )
             
-            if submitted:
-                f_str = fecha_pedido.strftime("%Y-%m-%d")
-                p_str = producto_pedido.strip().lower()
+            submitted_editor = st.form_submit_button("💾 Guardar Todos los Cambios")
+            
+            if submitted_editor:
                 user_actual = row_estacion['programador']
-                
                 cursor = conn.cursor()
                 try:
-                    check_query = f"""
-                        SELECT id FROM programacion_cargas 
-                        WHERE id_estacion = '{estacion_id_sel}' 
-                          AND fecha_programacion = '{f_str}' 
-                          AND LOWER(producto) = '{p_str}';
-                    """
-                    cursor.execute(check_query)
-                    existing = cursor.fetchone()
-                    
-                    if existing:
-                        update_query = f"""
-                            UPDATE programacion_cargas 
-                            SET volumen_programado = {volumen_pedido}, "user" = '{user_actual}'
-                            WHERE id_estacion = '{estacion_id_sel}' 
-                              AND fecha_programacion = '{f_str}' 
-                              AND LOWER(producto) = '{p_str}';
-                        """
-                        cursor.execute(update_query)
-                    else:
-                        insert_query = f"""
-                            INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado, "user")
-                            VALUES ('{estacion_id_sel}', '{producto_pedido}', '{f_str}', {volumen_pedido}, '{user_actual}');
-                        """
-                        cursor.execute(insert_query)
-                        
+                    for prod_name in ["Regular", "Premium", "Diesel"]:
+                        p_str = prod_name.strip().lower()
+                        for col_n in col_names:
+                            volumen_val = float(edited_df.loc[prod_name, col_n])
+                            f_obj = col_to_date[col_n]
+                            f_str = f_obj.strftime("%Y-%m-%d")
+                            
+                            # Verificar si ya existe registro
+                            check_query = f"""
+                                SELECT id FROM programacion_cargas 
+                                WHERE id_estacion = '{estacion_id_sel}' 
+                                  AND fecha_programacion = '{f_str}' 
+                                  AND LOWER(producto) = '{p_str}';
+                            """
+                            cursor.execute(check_query)
+                            existing = cursor.fetchone()
+                            
+                            if existing:
+                                update_query = f"""
+                                    UPDATE programacion_cargas 
+                                    SET volumen_programado = {volumen_val}, "user" = '{user_actual}'
+                                    WHERE id_estacion = '{estacion_id_sel}' 
+                                      AND fecha_programacion = '{f_str}' 
+                                      AND LOWER(producto) = '{p_str}';
+                                """
+                                cursor.execute(update_query)
+                            else:
+                                if volumen_val > 0: # Solo insertar si hay volumen positivo
+                                    insert_query = f"""
+                                        INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado, "user")
+                                        VALUES ('{estacion_id_sel}', '{prod_name}', '{f_str}', {volumen_val}, '{user_actual}');
+                                    """
+                                    cursor.execute(insert_query)
+                                    
                     conn.commit()
                     cursor.close()
-                    st.success(f"¡Pedido de {volumen_pedido:,.0f} L de {producto_pedido} guardado correctamente para el {f_str}!")
+                    st.success("¡Programa de cargas actualizado correctamente en todas las fechas!")
                     st.rerun()
                 except Exception as db_err:
                     conn.rollback()
                     cursor.close()
-                    st.error(f"Error al guardar el pedido en la base de datos: {db_err}")
+                    st.error(f"Error al guardar los pedidos en la base de datos: {db_err}")
 
     except Exception as e:
         st.error(f"Error al generar la matriz MRP: {e}")
