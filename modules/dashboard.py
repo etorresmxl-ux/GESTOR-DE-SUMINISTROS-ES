@@ -5,7 +5,7 @@ from datetime import date
 
 def render(conn):
     st.markdown("### 📊 Dashboard Operativo - Inventarios, Espacio Disponible y Días de Suministro (D/S)")
-    st.write("Resumen general por estación: Inventario actual, capacidad máxima permitida, cargas programadas y Días de Suministro calculados con VDP ponderada (12 semanas).")
+    st.write("Resumen general por estación: Inventario actual, capacidad máxima permitida, cargas programadas del día y Días de Suministro calculados con VDP ponderada (12 semanas).")
     
     query = """
         WITH ultimo_inventario AS (
@@ -30,7 +30,7 @@ def render(conn):
             SELECT DISTINCT 
                 id_estacion,
                 tad,
-                plaza,
+            plaza,
                 nombre as estacion
             FROM estaciones_detalle
         )
@@ -62,15 +62,14 @@ def render(conn):
             st.warning("No hay datos suficientes para generar el resumen.")
             return
 
-        # Consultar cargas programadas para hoy o próximas fechas para cruzar con alertas
+        # Consultar únicamente las cargas programadas para el DÍAS DE HOY
         hoy_str = date.today().strftime("%Y-%m-%d")
-        cargas_proyectadas = {} # {(estacion_id, producto): volumen_total_programado}
+        cargas_hoy = {} # {(estacion_id, producto): volumen_programado_hoy}
         try:
             query_cargas = f"""
-                SELECT id_estacion, producto, SUM(volumen_programado) as vol_prog
+                SELECT id_estacion, producto, volumen_programado
                 FROM programacion_cargas
-                WHERE fecha_programacion >= '{hoy_str}'
-                GROUP BY id_estacion, producto;
+                WHERE fecha_programacion = '{hoy_str}';
             """
             df_cargas = pd.read_sql(query_cargas, conn)
             if not df_cargas.empty:
@@ -85,9 +84,10 @@ def render(conn):
                         pk = 'diesel'
                     else:
                         pk = p_key
-                    cargas_proyectadas[(est_id, pk)] = float(rc['vol_prog'])
+                    vol = float(rc['volumen_programado']) if pd.notna(rc['volumen_programado']) else 0.0
+                    cargas_hoy[(est_id, pk)] = vol
         except Exception as e:
-            pass # Si hay advertencia menor en cargas, se continúa
+            pass
 
         # Calcular días de suministro actuales
         df['ds_r'] = df.apply(lambda r: round(r['reg_litros'] / r['vdp_reg'], 1) if r['cap_regular'] > 0 and r['vdp_reg'] > 0 else np.nan, axis=1)
@@ -100,7 +100,7 @@ def render(conn):
         df['espacio_d'] = df.apply(lambda r: max(0, r['cap_diesel'] - r['die_litros']) if r['cap_diesel'] > 0 else np.nan, axis=1)
 
         # ==========================================
-        # 1. CENTRO DE ALERTAS PRIORIZADAS (CON PROGRAMA DE CARGA Y POST-DESCARGA)
+        # 1. CENTRO DE ALERTAS PRIORIZADAS (CARGAS DEL DÍA Y POST-DESCARGA)
         # ==========================================
         st.markdown("### 🚨 Centro de Alertas y Prioridades de Abastecimiento")
         
@@ -119,16 +119,15 @@ def render(conn):
                         prioridad = 1 if ds < 1.0 else 2
                         nivel = "🔴 CRÍTICO (< 1 Día)" if ds < 1.0 else "🟡 ADVERTENCIA (< 2 Días)"
                         
-                        # Buscar si tiene carga programada próxima
-                        vol_carga = cargas_proyectadas.get((est_id, p_key), 0.0)
+                        # Buscar carga programada exclusivamente para HOY
+                        vol_carga_hoy = cargas_hoy.get((est_id, p_key), 0.0)
                         
-                        if vol_carga > 0:
-                            # Calcular condición post-descarga
-                            litros_post = litros + vol_carga
+                        if vol_carga_hoy > 0:
+                            litros_post = litros + vol_carga_hoy
                             ds_post = round(litros_post / vdp, 1) if vdp > 0 else ds
-                            programa_status = f"🚛 Sí ({vol_carga:,.0f} L) ➔ Post: {ds_post:.1f} d"
+                            programa_status = f"🚛 Sí ({vol_carga_hoy:,.0f} L) ➔ Post: {ds_post:.1f} d"
                         else:
-                            programa_status = "❌ Sin Programa"
+                            programa_status = "❌ Sin Carga Hoy"
 
                         alertas.append({
                             "prioridad": prioridad, 
@@ -155,7 +154,7 @@ def render(conn):
                 "Producto": df_alertas['producto'],
                 "Inventario Actual": df_alertas['litros'].apply(lambda x: f"{x:,.0f} L"),
                 "D/S Actual": df_alertas['ds'].apply(lambda x: f"{x:.1f} días"),
-                "Programa de Carga / Post-Descarga": df_alertas['programa']
+                "Programa Hoy / Post-Descarga": df_alertas['programa']
             })
             
             st.dataframe(tabla_alertas_vis, width='stretch', height=300, hide_index=True)
@@ -163,7 +162,7 @@ def render(conn):
         st.markdown("---")
 
         # ==========================================
-        # 2. TABLA GENERAL DE INVENTARIOS CON SEMÁFORO
+        # 2. TABLA GENERAL DE INVENTARIOS COMBINADA (INV + D/S)
         # ==========================================
         st.markdown("### 📋 Detalle General de Inventarios y Suministro")
 
@@ -189,13 +188,9 @@ def render(conn):
             "Plaza": df['plaza'].astype(str),
             "Estación": df['estacion'].astype(str),
             
-            "Reg (Inv / Cap.Max)": df.apply(lambda r: f"{r['reg_litros']:,.0f} L / {r['cap_regular']:,.0f} L" if r['cap_regular'] > 0 else "N/A", axis=1),
-            "Pre (Inv / Cap.Max)": df.apply(lambda r: f"{r['pre_litros']:,.0f} L / {r['cap_premium']:,.0f} L" if r['cap_premium'] > 0 else "N/A", axis=1),
-            "Die (Inv / Cap.Max)": df.apply(lambda r: f"{r['die_litros']:,.0f} L / {r['cap_diesel']:,.0f} L" if r['cap_diesel'] > 0 else "N/A", axis=1),
-            
-            "Reg D/S (VDP)": df.apply(lambda r: f"{r['ds_r']:.1f} días ({r['vdp_reg']:,.0f} L)" if r['cap_regular'] > 0 and pd.notna(r['ds_r']) else "N/A", axis=1),
-            "Pre D/S (VDP)": df.apply(lambda r: f"{r['ds_p']:.1f} días ({r['vdp_pre']:,.0f} L)" if r['cap_premium'] > 0 and pd.notna(r['ds_p']) else "N/A", axis=1),
-            "Die D/S (VDP)": df.apply(lambda r: f"{r['ds_d']:.1f} días ({r['vdp_die']:,.0f} L)" if r['cap_diesel'] > 0 and pd.notna(r['ds_d']) else "N/A", axis=1),
+            "REGULAR (Inv / D/S)": df.apply(lambda r: f"{r['reg_litros']:,.0f} L ({r['ds_r']:.1f} d)" if r['cap_regular'] > 0 and pd.notna(r['ds_r']) else "N/A", axis=1),
+            "PREMIUM (Inv / D/S)": df.apply(lambda r: f"{r['pre_litros']:,.0f} L ({r['ds_p']:.1f} d)" if r['cap_premium'] > 0 and pd.notna(r['ds_p']) else "N/A", axis=1),
+            "DIESEL (Inv / D/S)": df.apply(lambda r: f"{r['die_litros']:,.0f} L ({r['ds_d']:.1f} d)" if r['cap_diesel'] > 0 and pd.notna(r['ds_d']) else "N/A", axis=1),
         })
 
         st.dataframe(tabla_vis, width='stretch', height=450, hide_index=True)
