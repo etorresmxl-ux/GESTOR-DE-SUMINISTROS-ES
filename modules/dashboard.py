@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from datetime import date
 
 def render(conn):
     st.markdown("### 📊 Dashboard Operativo - Inventarios, Espacio Disponible y Días de Suministro (D/S)")
-    st.write("Resumen general por estación: Inventario actual, capacidad máxima permitida y Días de Suministro calculados con VDP ponderada (12 semanas).")
+    st.write("Resumen general por estación: Inventario actual, capacidad máxima permitida, cargas programadas y Días de Suministro calculados con VDP ponderada (12 semanas).")
     
     query = """
         WITH ultimo_inventario AS (
@@ -61,52 +62,84 @@ def render(conn):
             st.warning("No hay datos suficientes para generar el resumen.")
             return
 
-        # Calcular días de suministro solo si la estación vende el producto (capacidad > 0 y vdp > 0)
+        # Consultar cargas programadas para hoy o próximas fechas para cruzar con alertas
+        hoy_str = date.today().strftime("%Y-%m-%d")
+        cargas_proyectadas = {} # {(estacion_id, producto): volumen_total_programado}
+        try:
+            query_cargas = f"""
+                SELECT id_estacion, producto, SUM(volumen_programado) as vol_prog
+                FROM programacion_cargas
+                WHERE fecha_programacion >= '{hoy_str}'
+                GROUP BY id_estacion, producto;
+            """
+            df_cargas = pd.read_sql(query_cargas, conn)
+            if not df_cargas.empty:
+                for _, rc in df_cargas.iterrows():
+                    est_id = str(rc['id_estacion']).strip()
+                    p_key = str(rc['producto']).strip().lower()
+                    if 'regular' in p_key or 'magna' in p_key:
+                        pk = 'regular'
+                    elif 'premium' in p_key:
+                        pk = 'premium'
+                    elif 'diesel' in p_key:
+                        pk = 'diesel'
+                    else:
+                        pk = p_key
+                    cargas_proyectadas[(est_id, pk)] = float(rc['vol_prog'])
+        except Exception as e:
+            pass # Si hay advertencia menor en cargas, se continúa
+
+        # Calcular días de suministro actuales
         df['ds_r'] = df.apply(lambda r: round(r['reg_litros'] / r['vdp_reg'], 1) if r['cap_regular'] > 0 and r['vdp_reg'] > 0 else np.nan, axis=1)
         df['ds_p'] = df.apply(lambda r: round(r['pre_litros'] / r['vdp_pre'], 1) if r['cap_premium'] > 0 and r['vdp_pre'] > 0 else np.nan, axis=1)
         df['ds_d'] = df.apply(lambda r: round(r['die_litros'] / r['vdp_die'], 1) if r['cap_diesel'] > 0 and r['vdp_die'] > 0 else np.nan, axis=1)
 
-        # Calcular espacio disponible usando estrictamente la capacidad_maxima definitiva de la base de datos
+        # Calcular espacio disponible
         df['espacio_r'] = df.apply(lambda r: max(0, r['cap_regular'] - r['reg_litros']) if r['cap_regular'] > 0 else np.nan, axis=1)
         df['espacio_p'] = df.apply(lambda r: max(0, r['cap_premium'] - r['pre_litros']) if r['cap_premium'] > 0 else np.nan, axis=1)
         df['espacio_d'] = df.apply(lambda r: max(0, r['cap_diesel'] - r['die_litros']) if r['cap_diesel'] > 0 else np.nan, axis=1)
 
         # ==========================================
-        # 1. CENTRO DE ALERTAS PRIORIZADAS (PRIMERO)
+        # 1. CENTRO DE ALERTAS PRIORIZADAS (CON PROGRAMA DE CARGA Y POST-DESCARGA)
         # ==========================================
         st.markdown("### 🚨 Centro de Alertas y Prioridades de Abastecimiento")
         
         alertas = []
         for _, r in df.iterrows():
+            est_id = str(r['id_estacion']).strip()
             productos = [
-                ('Regular', r['ds_r'], r['reg_litros'], r['cap_regular'], r['espacio_r']), 
-                ('Premium', r['ds_p'], r['pre_litros'], r['cap_premium'], r['espacio_p']), 
-                ('Diesel', r['ds_d'], r['die_litros'], r['cap_diesel'], r['espacio_d'])
+                ('Regular', r['ds_r'], r['reg_litros'], r['cap_regular'], r['espacio_r'], r['vdp_reg'], 'regular'), 
+                ('Premium', r['ds_p'], r['pre_litros'], r['cap_premium'], r['espacio_p'], r['vdp_pre'], 'premium'), 
+                ('Diesel', r['ds_d'], r['die_litros'], r['cap_diesel'], r['espacio_d'], r['vdp_die'], 'diesel')
             ]
             
-            for prod, ds, litros, cap, espacio in productos:
+            for prod, ds, litros, cap, espacio, vdp, p_key in productos:
                 if cap > 0 and pd.notna(ds):
-                    if ds < 1.0:
+                    if ds < 2.0: # Menor a 2 días (Crítico o Advertencia)
+                        prioridad = 1 if ds < 1.0 else 2
+                        nivel = "🔴 CRÍTICO (< 1 Día)" if ds < 1.0 else "🟡 ADVERTENCIA (< 2 Días)"
+                        
+                        # Buscar si tiene carga programada próxima
+                        vol_carga = cargas_proyectadas.get((est_id, p_key), 0.0)
+                        
+                        if vol_carga > 0:
+                            # Calcular condición post-descarga
+                            litros_post = litros + vol_carga
+                            ds_post = round(litros_post / vdp, 1) if vdp > 0 else ds
+                            programa_status = f"🚛 Sí ({vol_carga:,.0f} L) ➔ Post: {ds_post:.1f} d"
+                        else:
+                            programa_status = "❌ Sin Programa"
+
                         alertas.append({
-                            "prioridad": 1, 
-                            "nivel": "🔴 CRÍTICO (< 1 Día)",
+                            "prioridad": prioridad, 
+                            "nivel": nivel,
                             "estacion": f"{r['id_estacion']} - {r['estacion']}",
                             "plaza": str(r['plaza']),
                             "producto": prod,
                             "ds": ds,
                             "litros": litros,
-                            "espacio": espacio
-                        })
-                    elif ds < 2.0:
-                        alertas.append({
-                            "prioridad": 2, 
-                            "nivel": "🟡 ADVERTENCIA (< 2 Días)",
-                            "estacion": f"{r['id_estacion']} - {r['estacion']}",
-                            "plaza": str(r['plaza']),
-                            "producto": prod,
-                            "ds": ds,
-                            "litros": litros,
-                            "espacio": espacio
+                            "espacio": espacio,
+                            "programa": programa_status
                         })
 
         if not alertas:
@@ -121,8 +154,8 @@ def render(conn):
                 "Plaza": df_alertas['plaza'],
                 "Producto": df_alertas['producto'],
                 "Inventario Actual": df_alertas['litros'].apply(lambda x: f"{x:,.0f} L"),
-                "Espacio Disponible": df_alertas['espacio'].apply(lambda x: f"{x:,.0f} L"),
-                "Días de Suministro": df_alertas['ds'].apply(lambda x: f"{x:.1f} días")
+                "D/S Actual": df_alertas['ds'].apply(lambda x: f"{x:.1f} días"),
+                "Programa de Carga / Post-Descarga": df_alertas['programa']
             })
             
             st.dataframe(tabla_alertas_vis, width='stretch', height=300, hide_index=True)
