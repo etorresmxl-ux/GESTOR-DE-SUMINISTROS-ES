@@ -151,7 +151,7 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar la VDP ponderada y factores: {e}")
 
-        # 8. Renderizar Matriz por Producto con Semáforo y Alerta de Inventario
+        # 8. Renderizar Matriz por Producto con HTML personalizado (incluyendo etiquetas, alertas y semáforos)
         productos = [
             ("REGULAR", "regular", "<span style='color:#2ecc71;'>REGULAR</span>"), 
             ("PREMIUM", "premium", "<span style='color:#e67e22;'>PREMIUM</span>"), 
@@ -168,8 +168,6 @@ def render(conn):
             inv_fin_row = []
             ds_row = []
             pct_row = []
-
-            ds_raws = []
 
             inv_actual = inv_actuales.get(prod_key, 0.0)
             prod_info = vdp_data_dict.get(prod_key, {'vdp': 0.0, 'factores': {i: 1.0 for i in range(7)}})
@@ -199,12 +197,10 @@ def render(conn):
                 ds = (inv_fin / vta) if vta > 0 else 0.0
                 pct = (inv_fin / cap_max) * 100 if cap_max > 0 else 0.0
 
-                ds_raws.append(ds)
-
                 # Icono de alerta si el inventario final es menor a 5000
                 inv_fin_str = f"⚠️ {inv_fin:,.0f}" if inv_fin < 5000 else f"{inv_fin:,.0f}"
 
-                # Icono de semáforo para D/S (< 1 rojo, < 2 amarillo, >= 2 verde)
+                # Círculo de semáforo para D/S (< 1 rojo, < 2 amarillo, >= 2 verde)
                 if ds < 1.0:
                     ds_str = f"🔴 {ds:.1f} d"
                 elif ds < 2.0:
@@ -220,7 +216,7 @@ def render(conn):
                 ds_row.append(ds_str)
                 pct_row.append(f"{pct:.1f}%")
 
-            # Construcción de tabla HTML personalizada para mostrar los datos de forma limpia
+            # Tabla HTML con la columna Métrica fija a la izquierda
             html_table = "<div style='overflow-x:auto;'><table style='width:100%; border-collapse: collapse; font-size: 13px; font-family: sans-serif;'>"
             html_table += "<thead><tr style='background-color: #f0f2f6; color: #31333F; border-bottom: 2px solid #ddd;'>"
             html_table += "<th style='padding: 6px 10px; text-align: left; border: 1px solid #ddd; position: sticky; left: 0; background-color: #f0f2f6; z-index: 1;'>Métrica</th>"
@@ -242,8 +238,7 @@ def render(conn):
                 html_table += "<tr>"
                 html_table += f"<td style='padding: 6px 10px; font-weight: bold; border: 1px solid #ddd; background-color: #f9f9f9; position: sticky; left: 0; z-index: 1;'>{label}</td>"
                 for val_str in data_list:
-                    cell_style = "padding: 6px 10px; text-align: center; border: 1px solid #ddd;"
-                    html_table += f"<td style='{cell_style}'>{val_str}</td>"
+                    html_table += f"<td style='padding: 6px 10px; text-align: center; border: 1px solid #ddd;'>{val_str}</td>"
                 html_table += "</tr>"
             html_table += "</tbody></table></div>"
 
