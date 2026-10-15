@@ -151,7 +151,7 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar la VDP ponderada y factores: {e}")
 
-        # 8. Renderizar Matriz por Producto
+        # 8. Renderizar Matriz por Producto con Semáforo y Alerta de Inventario
         productos = [
             ("REGULAR", "regular", "<span style='color:#2ecc71;'>REGULAR</span>"), 
             ("PREMIUM", "premium", "<span style='color:#e67e22;'>PREMIUM</span>"), 
@@ -168,6 +168,8 @@ def render(conn):
             inv_fin_row = []
             ds_row = []
             pct_row = []
+
+            ds_raws = []
 
             inv_actual = inv_actuales.get(prod_key, 0.0)
             prod_info = vdp_data_dict.get(prod_key, {'vdp': 0.0, 'factores': {i: 1.0 for i in range(7)}})
@@ -197,37 +199,54 @@ def render(conn):
                 ds = (inv_fin / vta) if vta > 0 else 0.0
                 pct = (inv_fin / cap_max) * 100 if cap_max > 0 else 0.0
 
+                ds_raws.append(ds)
+
+                # Icono de alerta si el inventario final es menor a 5000
+                inv_fin_str = f"⚠️ {inv_fin:,.0f}" if inv_fin < 5000 else f"{inv_fin:,.0f}"
+
                 inv_ini_row.append(f"{inv_ini:,.0f}")
                 espacio_disp_row.append(f"{espacio_disp:,.0f}")
                 carga_row.append(f"{carga:,.0f}" if carga > 0 else "-")
                 vta_row.append(f"{vta:,.0f}")
-                inv_fin_row.append(f"{inv_fin:,.0f}")
+                inv_fin_row.append(inv_fin_str)
                 ds_row.append(f"{ds:.1f} d")
                 pct_row.append(f"{pct:.1f}%")
 
-            df_matriz = pd.DataFrame(
-                [
-                    inv_ini_row,
-                    espacio_disp_row,
-                    carga_row,
-                    vta_row,
-                    inv_fin_row,
-                    ds_row,
-                    pct_row
-                ],
-                index=[
-                    "Inventario Inicial",
-                    "Espacio disponible",
-                    "Programa (Carga)",
-                    "Venta Proyectada",
-                    "Inventario Final",
-                    "D/S (Final)",
-                    "% Tanque (Final)"
-                ],
-                columns=col_names_matrix
-            )
+            # Construcción de tabla HTML personalizada para soportar estilos y semáforos en celdas
+            html_table = "<div style='overflow-x:auto;'><table style='width:100%; border-collapse: collapse; font-size: 13px; font-family: sans-serif;'>"
+            html_table += "<thead><tr style='background-color: #f0f2f6; color: #31333F; border-bottom: 2px solid #ddd;'>"
+            html_table += "<th style='padding: 6px 10px; text-align: left; border: 1px solid #ddd; position: sticky; left: 0; background-color: #f0f2f6; z-index: 1;'>Métrica</th>"
+            for col in col_names_matrix:
+                html_table += f"<th style='padding: 6px 10px; text-align: center; border: 1px solid #ddd;'>{col}</th>"
+            html_table += "</tr></thead><tbody>"
 
-            st.dataframe(df_matriz, width='stretch')
+            metrics = [
+                ("Inventario Inicial", inv_ini_row, None),
+                ("Espacio disponible", espacio_disp_row, None),
+                ("Programa (Carga)", carga_row, None),
+                ("Venta Proyectada", vta_row, None),
+                ("Inventario Final", inv_fin_row, None),
+                ("D/S (Final)", ds_row, "ds"),
+                ("% Tanque (Final)", pct_row, None)
+            ]
+
+            for label, data_list, style_type in metrics:
+                html_table += "<tr>"
+                html_table += f"<td style='padding: 6px 10px; font-weight: bold; border: 1px solid #ddd; background-color: #f9f9f9; position: sticky; left: 0; z-index: 1;'>{label}</td>"
+                for idx, val_str in enumerate(data_list):
+                    cell_style = "padding: 6px 10px; text-align: center; border: 1px solid #ddd;"
+                    if style_type == "ds":
+                        ds_val = ds_raws[idx]
+                        if ds_val < 1.0:
+                            cell_style += " background-color: #f8d7da; color: #721c24; font-weight: bold;"  # Rojo (menos de 1 día)
+                        elif ds_val < 2.0:
+                            cell_style += " background-color: #fff3cd; color: #856404; font-weight: bold;"  # Amarillo (menos de 2 días)
+                    
+                    html_table += f"<td style='{cell_style}'>{val_str}</td>"
+                html_table += "</tr>"
+            html_table += "</tbody></table></div>"
+
+            st.markdown(html_table, unsafe_allow_html=True)
             st.markdown("")
 
         # 9. Sección Interactiva para Registrar / Actualizar Pedidos Masivos (con números puros)
