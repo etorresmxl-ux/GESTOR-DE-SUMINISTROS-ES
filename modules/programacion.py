@@ -89,10 +89,10 @@ def render(conn):
                     p_str = str(r['producto']).strip().lower()
                     vol = float(r['volumen_programado']) if pd.notna(r['volumen_programado']) else 0.0
                     cargas_guardadas[(f_str, p_str)] = vol
-        except Exception:
-            pass
+        except Exception as e:
+            st.warning(f"Aviso al cargar pedidos guardados: {e}")
 
-        # 6. Obtener Inventario Inicial actual del producto (CORREGIDO: Sin turno)
+        # 6. Obtener Inventario Inicial actual del producto (Sin turno)
         inv_actuales = {"regular": 0.0, "premium": 0.0, "diesel": 0.0}
         try:
             query_inv = f"""
@@ -107,8 +107,8 @@ def render(conn):
                 inv_actuales['regular'] = float(df_inv['regular'].iloc[0]) if pd.notna(df_inv['regular'].iloc[0]) else 0.0
                 inv_actuales['premium'] = float(df_inv['premium'].iloc[0]) if pd.notna(df_inv['premium'].iloc[0]) else 0.0
                 inv_actuales['diesel'] = float(df_inv['diesel'].iloc[0]) if pd.notna(df_inv['diesel'].iloc[0]) else 0.0
-        except Exception:
-            pass
+        except Exception as e:
+            st.warning(f"Aviso al consultar inventarios históricos: {e}")
 
         # 7. Obtener VDP Ponderada (Venta Proyectada Diaria)
         vdp_dict = {"regular": 0.0, "premium": 0.0, "diesel": 0.0}
@@ -129,8 +129,8 @@ def render(conn):
                         vdp_dict['premium'] = val
                     elif 'diesel' in p_name:
                         vdp_dict['diesel'] = val
-        except Exception:
-            pass
+        except Exception as e:
+            st.warning(f"Aviso al consultar la VDP ponderada: {e}")
 
         # 8. Renderizar Matriz por Producto
         productos = [("REGULAR", "regular"), ("PREMIUM", "premium"), ("DIESEL", "diesel")]
@@ -148,6 +148,7 @@ def render(conn):
             inv_actual = inv_actuales.get(prod_key, 0.0)
             vdp_val = vdp_dict.get(prod_key, 0.0)
             cap_max = capacidades.get(prod_key, 100000.0)
+            inv_fin_prev = 0.0
 
             for i, f_date in enumerate(fechas):
                 if i == 0:
@@ -193,7 +194,7 @@ def render(conn):
                 columns=col_names
             )
 
-            st.dataframe(df_matriz, width='stretch')
+            st.dataframe(df_matriz, use_container_width=True)
             st.markdown("")
 
         # 9. Sección para Registrar / Actualizar Pedidos (Programa de Carga)
@@ -238,18 +239,3 @@ def render(conn):
                         cursor.execute(update_query)
                     else:
                         insert_query = f"""
-                            INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado, "user")
-                            VALUES ('{estacion_id_sel}', '{producto_pedido}', '{f_str}', {volumen_pedido}, '{user_actual}');
-                        """
-                        cursor.execute(insert_query)
-                        
-                    conn.commit()
-                    cursor.close()
-                    st.success(f"¡Pedido de {volumen_pedido:,.0f} L de {producto_pedido} guardado correctamente para el {f_str}!")
-                    st.rerun()
-                except Exception as db_err:
-                    conn.rollback()
-                    st.error(f"Error al guardar el pedido en la base de datos: {db_err}")
-
-    except Exception as e:
-        st.error(f"Error al generar la matriz MRP: {e}")
