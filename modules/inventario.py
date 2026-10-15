@@ -26,30 +26,28 @@ def render(conn):
     
     try:
         # 1. Obtener la lista de programadores
-        query_prog = "SELECT DISTINCT usuario FROM estaciones WHERE usuario IS NOT NULL ORDER BY usuario;"
+        query_prog = 'SELECT DISTINCT "user" AS usuario FROM estaciones_detalle WHERE "user" IS NOT NULL ORDER BY usuario;'
         df_prog = pd.read_sql(query_prog, conn)
         
         if df_prog.empty:
             st.warning("No hay programadores asignados en las estaciones.")
             return
 
-        # Controles superiores compactos (Turnos en formato 24 horas)
-        col_f1, col_f2, col_f3 = st.columns([1.2, 1, 1.2])
+        # Controles superiores compactos (Solo Fecha y Programador)
+        col_f1, col_f2 = st.columns(2)
         with col_f1:
-            fecha_registro = st.date_input("Fecha", date.today())
+            fecha_registro = st.date_input("Fecha de Inventario", date.today())
         with col_f2:
-            turno_seleccionado = st.selectbox("Turno", ["06:00", "14:00", "22:00"])
-        with col_f3:
             usuario_seleccionado = st.selectbox("Programador", df_prog["usuario"].tolist())
         
         st.markdown("---")
 
-        # 2. Consultar las estaciones asignadas a este usuario
+        # 2. Consultar las estaciones asignadas a este usuario desde estaciones_detalle
         query_est = f"""
-            SELECT id AS "ID", tad AS "TAD", plaza AS "Plaza", nombre AS "Estacion"
-            FROM estaciones
-            WHERE usuario = '{usuario_seleccionado}'
-            ORDER BY plaza, id;
+            SELECT DISTINCT id_estacion AS "ID", tad AS "TAD", plaza AS "Plaza", nombre AS "Estacion"
+            FROM estaciones_detalle
+            WHERE "user" = '{usuario_seleccionado}'
+            ORDER BY plaza, id_estacion;
         """
         df_estaciones = pd.read_sql(query_est, conn)
         
@@ -57,7 +55,7 @@ def render(conn):
             st.warning(f"El usuario {usuario_seleccionado} no tiene estaciones asignadas.")
             return
 
-        # 3. Buscar si ya existen registros previos para esta fecha y turno (24 hrs)
+        # 3. Buscar si ya existen registros previos para esta fecha
         ids_estaciones = tuple(df_estaciones["ID"].tolist())
         if len(ids_estaciones) == 1:
             ids_str = f"('{ids_estaciones[0]}')"
@@ -68,7 +66,6 @@ def render(conn):
             SELECT estacion_id, regular, premium, diesel 
             FROM inventarios_historico 
             WHERE fecha = '{fecha_registro}' 
-              AND turno = '{turno_seleccionado}'
               AND estacion_id IN {ids_str};
         """
         df_existentes = pd.read_sql(query_exist, conn)
@@ -91,10 +88,10 @@ def render(conn):
                     df_estaciones.loc[idx, "Premium"] = int(pre_val) if pd.notna(pre_val) else 0
                     df_estaciones.loc[idx, "Diesel"] = int(die_val) if pd.notna(die_val) else 0
 
-        st.caption(f"Mostrando **{len(df_estaciones)} estaciones** asignadas a **{usuario_seleccionado}** (Turno: **{turno_seleccionado}**, Fecha: **{fecha_registro}**).")
+        st.caption(f"Mostrando **{len(df_estaciones)} estaciones** asignadas a **{usuario_seleccionado}** (Fecha: **{fecha_registro}**).")
 
         # 4. Tabla interactiva
-        with st.form("form_captura_masiva"):
+        with st.form("form_captura_masiva_inventario"):
             df_editado = st.data_editor(
                 df_estaciones,
                 column_config={
@@ -112,26 +109,27 @@ def render(conn):
                 height=550
             )
             
-            submitted = st.form_submit_button("💾 Guardar / Actualizar Inventarios", width='stretch')
+            submitted = st.form_submit_button("💾 Guardar / Actualizar Inventarios")
             
             if submitted:
                 try:
                     cursor = conn.cursor()
                     for _, row in df_editado.iterrows():
+                        # Usamos INSERT con ON CONFLICT basado en (estacion_id, fecha)
                         cursor.execute(
                             """
-                            INSERT INTO inventarios_historico (estacion_id, fecha, turno, regular, premium, diesel)
-                            VALUES (%s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (estacion_id, fecha, turno) 
+                            INSERT INTO inventarios_historico (estacion_id, fecha, regular, premium, diesel)
+                            VALUES (%s, %s, %s, %s, %s)
+                            ON CONFLICT (estacion_id, fecha) 
                             DO UPDATE SET regular = EXCLUDED.regular, 
                                           premium = EXCLUDED.premium, 
                                           diesel = EXCLUDED.diesel;
                             """,
-                            (row["ID"], fecha_registro, turno_seleccionado, row["Regular"], row["Premium"], row["Diesel"])
+                            (row["ID"], fecha_registro, row["Regular"], row["Premium"], row["Diesel"])
                         )
                     conn.commit()
                     cursor.close()
-                    st.success(f"¡Inventarios guardados correctamente para el turno {turno_seleccionado}!")
+                    st.success(f"¡Inventarios guardados correctamente para la fecha {fecha_registro}!")
                 except Exception as e:
                     st.error(f"Error al guardar los registros en la base de datos: {e}")
 
