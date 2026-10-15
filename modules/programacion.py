@@ -237,3 +237,21 @@ def render(conn):
                               AND LOWER(producto) = '{p_str}';
                         """
                         cursor.execute(update_query)
+                    else:
+                        insert_query = f"""
+                            INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado, "user")
+                            VALUES ('{estacion_id_sel}', '{producto_pedido}', '{f_str}', {volumen_pedido}, '{user_actual}');
+                        """
+                        cursor.execute(insert_query)
+                        
+                    conn.commit()
+                    cursor.close()
+                    st.success(f"¡Pedido de {volumen_pedido:,.0f} L de {producto_pedido} guardado correctamente para el {f_str}!")
+                    st.rerun()
+                except Exception as db_err:
+                    conn.rollback()
+                    cursor.close()
+                    st.error(f"Error al guardar el pedido en la base de datos: {db_err}")
+
+    except Exception as e:
+        st.error(f"Error al generar la matriz MRP: {e}")
