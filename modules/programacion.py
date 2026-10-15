@@ -61,16 +61,22 @@ def render(conn):
         st.markdown(f"## ⛽ {estacion_id_sel} - {row_estacion['estacion_nombre']}")
         st.markdown("---")
         
-        # 4. Definir rango de fechas (14 días a partir de hoy) - Solo formato dd-mmm
+        # 4. Definir rango de fechas (14 días a partir de hoy)
         dias_proyeccion = 14
         hoy = date.today()
         fechas = [hoy + timedelta(days=i) for i in range(dias_proyeccion)]
         
+        dias_semana = ['lun.', 'mar.', 'mié.', 'jue.', 'vie.', 'sáb.', 'dom.']
         meses = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.']
-        col_names = [f"{f.day:02d}-{meses[f.month-1]}" for f in fechas]
+        
+        # Formato para las tablas de productos: "ddd. dd-mmm" (ej. jue. 15-oct.)
+        col_names_matrix = [f"{dias_semana[f.weekday()]} {f.day:02d}-{meses[f.month-1]}" for f in fechas]
+        
+        # Formato exclusivo para el editor: "dd-mmm" (ej. 15-oct.)
+        col_names_editor = [f"{f.day:02d}-{meses[f.month-1]}" for f in fechas]
 
-        # Mapeo inverso de columnas a objetos date para guardar
-        col_to_date = {col_names[i]: fechas[i] for i in range(len(fechas))}
+        # Mapeo inverso de columnas del editor a objetos date para guardar
+        col_to_date = {col_names_editor[i]: fechas[i] for i in range(len(fechas))}
 
         # 5. Consultar Cargas Programadas guardadas en la base de datos para esta estación
         cargas_guardadas = {} # {(fecha_str, producto): volumen}
@@ -145,7 +151,7 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al consultar la VDP ponderada y factores: {e}")
 
-        # 8. Renderizar Matriz por Producto con colores personalizados en los títulos
+        # 8. Renderizar Matriz por Producto (con col_names_matrix que incluye el día de la semana)
         productos = [
             ("REGULAR", "regular", "<span style='color:#2ecc71;'>REGULAR</span>"), 
             ("PREMIUM", "premium", "<span style='color:#e67e22;'>PREMIUM</span>"), 
@@ -218,20 +224,19 @@ def render(conn):
                     "D/S (Final)",
                     "% Tanque (Final)"
                 ],
-                columns=col_names
+                columns=col_names_matrix
             )
 
             st.dataframe(df_matriz, width='stretch')
             st.markdown("")
 
-        # 9. Sección Interactiva para Registrar / Actualizar Pedidos Masivos
+        # 9. Sección Interactiva para Registrar / Actualizar Pedidos Masivos (con col_names_editor que usa solo dd-mmm)
         st.markdown("---")
         st.markdown("#### 📝 Editor de Programa de Carga (14 Días)")
         st.write("Modifica directamente los volúmenes de carga en la tabla inferior y haz clic en **Guardar Cambios**.")
 
-        # Construir DataFrame para el editor con formato de miles (string formateado para visualización inicial)
         editor_data = {}
-        for col_n in col_names:
+        for col_n in col_names_editor:
             f_obj = col_to_date[col_n]
             f_str_k = f_obj.strftime("%Y-%m-%d")
             editor_data[col_n] = [
@@ -257,10 +262,9 @@ def render(conn):
                 try:
                     for prod_name in ["Regular", "Premium", "Diesel"]:
                         p_str = prod_name.strip().lower()
-                        for col_n in col_names:
+                        for col_n in col_names_editor:
                             val_raw = edited_df.loc[prod_name, col_n]
                             
-                            # Limpiar comas o caracteres extra que el usuario haya puesto al editar
                             if isinstance(val_raw, str):
                                 val_clean = val_raw.replace(',', '').strip()
                                 volumen_val = float(val_clean) if val_clean and val_clean != '-' else 0.0
@@ -270,7 +274,6 @@ def render(conn):
                             f_obj = col_to_date[col_n]
                             f_str = f_obj.strftime("%Y-%m-%d")
                             
-                            # Verificar si ya existe registro
                             check_query = f"""
                                 SELECT id FROM programacion_cargas 
                                 WHERE id_estacion = '{estacion_id_sel}' 
@@ -290,7 +293,7 @@ def render(conn):
                                 """
                                 cursor.execute(update_query)
                             else:
-                                if volumen_val > 0: # Solo insertar si hay volumen positivo
+                                if volumen_val > 0:
                                     insert_query = f"""
                                         INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado, "user")
                                         VALUES ('{estacion_id_sel}', '{prod_name}', '{f_str}', {volumen_val}, '{user_actual}');
