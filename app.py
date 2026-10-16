@@ -1,6 +1,6 @@
 import streamlit as st
 from database import init_connection
-from modules import inventario, ventas, importador, dashboard, programacion
+from modules import inventario, ventas, importador, dashboard, programacion, administrador_cargas
 
 st.set_page_config(
     page_title="Gestión de Suministro - Gasolineras",
@@ -18,26 +18,5 @@ menu = st.sidebar.radio(
     [
         "📊 Dashboard Operativo",
         "📅 Matriz de Programación (MRP)",
-        "📥 Importar Masivos (CSV)",
-        "📝 Registro de Inventarios", 
-        "📊 Registro de Ventas"
-    ]
-)
-
-conn = init_connection()
-
-if conn:
-    if menu == "📊 Dashboard Operativo":
-        dashboard.render(conn)
-    elif menu == "📅 Matriz de Programación (MRP)":
-        programacion.render(conn)
-    elif menu == "📥 Importar Masivos (CSV)":
-        importador.render(conn)
-    elif menu == "📝 Registro de Inventarios":
-        inventario.render(conn)
-    elif menu == "📊 Registro de Ventas":
-        ventas.render(conn)
-    
-    conn.close()
-else:
-    st.error("No se pudo establecer la conexión con la base de datos.")
+        "🚛 Administrador de Cargas",
+        "📥
