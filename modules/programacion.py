@@ -78,6 +78,7 @@ def render(conn):
         # 4. Definir rango de fechas (14 días a partir de hoy)
         dias_proyeccion = 14
         hoy = date.today()
+        hoy_str = hoy.strftime("%Y-%m-%d")
         fechas = [hoy + timedelta(days=i) for i in range(dias_proyeccion)]
         
         dias_semana = ['lun.', 'mar.', 'mié.', 'jue.', 'vie.', 'sáb.', 'dom.']
@@ -110,11 +111,12 @@ def render(conn):
         except Exception as e:
             st.warning(f"Aviso al cargar pedidos guardados: {e}")
 
-        # 6. Obtener Inventario Inicial actual del producto (Sin turno)
+        # 6. Obtener Inventario Inicial actual del producto y su fecha de registro
         inv_actuales = {"regular": 0.0, "premium": 0.0, "diesel": 0.0}
+        fecha_inventario = None
         try:
             query_inv = f"""
-                SELECT regular, premium, diesel 
+                SELECT fecha, regular, premium, diesel 
                 FROM inventarios_historico 
                 WHERE estacion_id = '{estacion_id_sel}' 
                 ORDER BY fecha DESC 
@@ -125,8 +127,18 @@ def render(conn):
                 inv_actuales['regular'] = float(df_inv['regular'].iloc[0]) if pd.notna(df_inv['regular'].iloc[0]) else 0.0
                 inv_actuales['premium'] = float(df_inv['premium'].iloc[0]) if pd.notna(df_inv['premium'].iloc[0]) else 0.0
                 inv_actuales['diesel'] = float(df_inv['diesel'].iloc[0]) if pd.notna(df_inv['diesel'].iloc[0]) else 0.0
+                fecha_inventario = df_inv['fecha'].iloc[0]
         except Exception as e:
             st.warning(f"Aviso al consultar inventarios históricos: {e}")
+
+        # Función auxiliar para determinar si el inventario inicial es teórico (si no es de hoy)
+        def formato_inv_inicial(litros, fecha_inv):
+            if pd.isna(fecha_inv):
+                return f"*{litros:,.0f} L"
+            f_str = pd.to_datetime(fecha_inv).strftime("%Y-%m-%d")
+            es_teorico = f_str < hoy_str
+            prefijo = "*" if es_teorico else ""
+            return f"{prefijo}{litros:,.0f} L"
 
         # 7. Obtener VDP Ponderada y Factores de Temporalidad por Día de la Semana
         vdp_data_dict = {} 
@@ -201,8 +213,11 @@ def render(conn):
             for i, f_date in enumerate(fechas):
                 if i == 0:
                     inv_ini = inv_actual
+                    # Aplicar formato especial (con o sin *) al inventario inicial del día 1
+                    inv_ini_val_str = formato_inv_inicial(inv_ini, fecha_inventario)
                 else:
                     inv_ini = inv_fin_prev
+                    inv_ini_val_str = f"{inv_ini:,.0f}"
 
                 espacio_disp = cap_max - inv_ini
                 f_str_key = f_date.strftime("%Y-%m-%d")
@@ -241,7 +256,7 @@ def render(conn):
                 else:
                     ds_str = f"🟢 {ds:.1f} d"
 
-                inv_ini_row.append(f"{inv_ini:,.0f}")
+                inv_ini_row.append(inv_ini_val_str)
                 espacio_disp_row.append(f"{espacio_disp:,.0f}")
                 vta_row.append(f"{vta:,.0f}")
                 inv_fin_row.append(inv_fin_str)
