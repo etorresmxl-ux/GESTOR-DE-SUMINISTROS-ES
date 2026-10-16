@@ -30,7 +30,7 @@ def render(conn):
             SELECT DISTINCT 
                 id_estacion,
                 tad,
-            plaza,
+                plaza,
                 nombre as estacion
             FROM estaciones_detalle
         )
@@ -62,7 +62,7 @@ def render(conn):
             st.warning("No hay datos suficientes para generar el resumen.")
             return
 
-        # Consultar únicamente las cargas programadas para el DÍAS DE HOY
+        # Consultar únicamente las cargas programadas para el DÍA DE HOY
         hoy_str = date.today().strftime("%Y-%m-%d")
         cargas_hoy = {} # {(estacion_id, producto): volumen_programado_hoy}
         try:
@@ -100,7 +100,7 @@ def render(conn):
         df['espacio_d'] = df.apply(lambda r: max(0, r['cap_diesel'] - r['die_litros']) if r['cap_diesel'] > 0 else np.nan, axis=1)
 
         # ==========================================
-        # 1. CENTRO DE ALERTAS PRIORIZADAS (CARGAS DEL DÍA Y POST-DESCARGA)
+        # 1. CENTRO DE ALERTAS PRIORIZADAS (CON FORMATO TEÓRICO *)
         # ==========================================
         st.markdown("### 🚨 Centro de Alertas y Prioridades de Abastecimiento")
         
@@ -123,9 +123,10 @@ def render(conn):
                         vol_carga_hoy = cargas_hoy.get((est_id, p_key), 0.0)
                         
                         if vol_carga_hoy > 0:
-                            litros_post = litros + vol_carga_hoy
+                            # Inventario teórico final descontando VDP y sumando descarga programada
+                            litros_post = litros + vol_carga_hoy - vdp
                             ds_post = round(litros_post / vdp, 1) if vdp > 0 else ds
-                            programa_status = f"🚛 Sí ({vol_carga_hoy:,.0f} L) ➔ Post: {ds_post:.1f} d"
+                            programa_status = f"🚛 Sí ({vol_carga_hoy:,.0f} L) ➔ Post: *{litros_post:,.0f} L ({ds_post:.1f} d)"
                         else:
                             programa_status = "❌ Sin Carga Hoy"
 
@@ -154,7 +155,7 @@ def render(conn):
                 "Producto": df_alertas['producto'],
                 "Inventario Actual": df_alertas['litros'].apply(lambda x: f"{x:,.0f} L"),
                 "D/S Actual": df_alertas['ds'].apply(lambda x: f"{x:.1f} días"),
-                "Programa Hoy / Post-Descarga": df_alertas['programa']
+                "Programa Hoy / Post-Entrega": df_alertas['programa']
             })
             
             st.dataframe(tabla_alertas_vis, width='stretch', height=300, hide_index=True)
