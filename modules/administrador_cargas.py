@@ -3,8 +3,8 @@ import pandas as pd
 from datetime import date
 
 def render(conn):
-    st.markdown("### 🚛 Administrador de Cargas (Ejecución y Cruce de Remisiones)")
-    st.write("Registra y audita las descargas reales cruzando la Remisión Pemex (RP) contra la planeación y el folio de factura del distribuidor.")
+    st.markdown("### 🚛 Administrador de Cargas (Ejecución y Bitácora Real)")
+    st.write("Control de autotanques: Vincula la **Orden de Carga** (plan) o registra **Descargas Extraordinarias** (sin orden), capturando Remisión Pemex (RP), Factura del Distribuidor, volúmenes físicos, temperaturas y fletes.")
 
     if conn is None:
         st.error("No hay conexión a la base de datos.")
@@ -28,18 +28,19 @@ def render(conn):
 
         st.markdown("---")
 
-        # 2. Pestañas de Navegación del Módulo
-        tab1, tab2 = st.tabs(["📥 Registrar Descarga Real (Orden de Carga)", "📋 Historial y Auditoría de Bitácora"])
+        # 2. Pestañas del Módulo
+        tab1, tab2 = st.tabs(["📥 Registrar Descarga (Con o Sin Orden)", "📋 Historial de Bitácora y Remisiones"])
 
         # ==========================================
-        # PESTAÑA 1: REGISTRAR DESCARGA DESDE LA ORDEN
+        # PESTAÑA 1: REGISTRAR DESCARGA
         # ==========================================
         with tab1:
-            st.markdown("#### 🔍 Órdenes Programadas Recientes")
-            st.write("Selecciona la orden planeada para vincularla con los datos reales de la orden de carga de Pemex.")
+            st.markdown("#### 🔍 Seleccionar Orden de Carga o Registro Manual")
+            st.write("Selecciona una Orden de Carga del programa o elige la opción manual para recibir una pipa imprevista.")
 
+            # Consultar programa de cargas para esta estación
             query_prog = f"""
-                SELECT id, id_estacion, producto, fecha_programacion, volumen_programado, "user"
+                SELECT id AS orden_carga, producto, fecha_programacion, volumen_programado
                 FROM programacion_cargas
                 WHERE id_estacion = '{estacion_id_sel}'
                 ORDER BY fecha_programacion DESC
@@ -47,75 +48,110 @@ def render(conn):
             """
             df_prog = pd.read_sql(query_prog, conn)
 
-            if df_prog.empty:
-                st.info("No hay cargas programadas registradas para esta estación.")
-            else:
-                st.dataframe(df_prog, width='stretch', hide_index=True)
+            # Opciones para el selector de Orden de Carga
+            opciones_ordenes = ["-- Sin Orden de Carga (Descarga Extraordinaria / Imprevista) --"]
+            if not df_prog.empty:
+                for _, r in df_prog.iterrows():
+                    f_str = str(r['fecha_programacion']).split("T")[0]
+                    opciones_ordenes.append(f"Orden de Carga #{r['orden_carga']} | {r['producto']} | {f_str} | {r['volumen_programado']:,.0f} L")
 
-                st.markdown("#### ✍️ Captura de Datos de la Orden de Carga y Recepción")
+            st.markdown("#### ✍️ Captura de Datos de la Orden de Carga y Factura")
+            
+            with st.form("form_registrar_descarga_detallada"):
+                sel_orden_str = st.selectbox("Vinculación con Orden de Carga (Plan):", opciones_ordenes)
                 
-                with st.form("form_registrar_descarga_detallada"):
-                    col_id, col_prod = st.columns(2)
-                    with col_id:
-                        prog_ids = df_prog['id'].tolist()
-                        sel_prog_id = st.selectbox("ID de Orden Programada (Plan):", prog_ids)
-                    
-                    row_sel = df_prog[df_prog['id'] == sel_prog_id].iloc[0]
+                es_manual = sel_orden_str.startswith("--")
+                
+                col_prod, col_fec_desc, col_vol_sug = st.columns(3)
+                
+                if es_manual:
+                    sel_prog_id_val = "NULL"
+                    with col_prod:
+                        producto_descarga = st.selectbox("Producto Descargado:", ["REGULAR", "PREMIUM", "DIESEL"])
+                    with col_fec_desc:
+                        fecha_descarga_real = st.date_input("Fecha de Descarga Real:", value=date.today())
+                    with col_vol_sug:
+                        st.info("Descarga manual no atada a un plan previo.")
+                else:
+                    # Extraer ID de la orden seleccionada
+                    orden_id_num = int(sel_orden_str.split("#")[1].split(" ")[0])
+                    sel_prog_id_val = str(orden_id_num)
+                    row_sel = df_prog[df_prog['orden_carga'] == orden_id_num].iloc[0]
                     
                     with col_prod:
-                        producto_fijo = st.text_input("Producto:", value=str(row_sel['producto']), disabled=True)
+                        producto_descarga = st.text_input("Producto:", value=str(row_sel['producto']), disabled=True)
+                    with col_fec_desc:
+                        fecha_descarga_real = st.date_input("Fecha de Descarga Real:", value=date.today())
+                    with col_vol_sug:
+                        vol_prog_val = float(row_sel['volumen_programado']) if pd.notna(row_sel['volumen_programado']) else 0.0
+                        st.text_input("Volumen Programado Original (L):", value=f"{vol_prog_val:,.0f} L", disabled=True)
 
-                    st.markdown("##### 📄 Datos de Embarque y Pemex")
-                    c1, c2, c3, c4 = st.columns(4)
-                    with c1:
-                        num_embarque = st.text_input("Núm. de Embarque:")
-                    with c2:
-                        fecha_carga = st.date_input("Fecha de Carga:", value=date.today())
-                    with c3:
-                        tad_origen = st.text_input("TAD de Origen:")
-                    with c4:
-                        remision_pemex = st.text_input("RP (Remisión Pemex):")
+                st.markdown("---")
+                st.markdown("##### ⛽ Datos del Autotanque y Documentos (Pemex / Distribuidor)")
 
-                    c5, c6, c7, c8 = st.columns(4)
-                    with c5:
-                        cliente_pemex = st.text_input("Cliente (Núm. Distribuidor):")
-                    with c6:
-                        destino_codigo = st.text_input("Destino (3 dígitos):")
-                    with c7:
-                        temperatura = st.number_input("Temperatura (°C):", value=20.0, step=0.1)
-                    with c8:
-                        importe_flete = st.number_input("Importe Flete ($):", min_value=0.0, value=0.0, step=100.0, format="%.2f")
+                c1, c2, c3, c4 = st.columns(4)
+                with c1:
+                    num_embarque = st.text_input("Número de Embarque:")
+                with c2:
+                    fecha_carga = st.date_input("Fecha de Carga (TAD):", value=date.today())
+                with c3:
+                    tad_origen = st.text_input("TAD de Origen:")
+                with c4:
+                    cliente_pemex = st.text_input("Cliente (Núm. Pemex):")
 
-                    st.markdown("##### 📊 Volúmenes y Facturación del Distribuidor")
-                    c9, c10, c11, c12 = st.columns(4)
-                    with c9:
-                        vol_sugerido = float(row_sel['volumen_programado']) if pd.notna(row_sel['volumen_programado']) else 0.0
-                        cant_natural = st.number_input("Cantidad al Natural (L):", min_value=0.0, value=vol_sugerido, step=100.0)
-                    with c10:
-                        cant_20c = st.number_input("Cantidad a 20°C (L):", min_value=0.0, value=vol_sugerido, step=100.0)
-                    with c11:
-                        folio_factura = st.text_input("Folio Factura (Distribuidor):")
-                    with c12:
-                        orden_remision = st.text_input("Orden Remisión Interna:")
+                c5, c6, c7, c8 = st.columns(4)
+                with c5:
+                    destino_num = st.text_input("Destino (3 dígitos):")
+                with c6:
+                    cant_natural = st.number_input("Cantidad al Natural (L):", min_value=0.0, step=100.0)
+                with c7:
+                    cant_20c = st.number_input("Cantidad a 20°C (L):", min_value=0.0, step=100.0)
+                with c8:
+                    temperatura = st.number_input("Temperatura (°C):", value=20.0, step=0.1)
 
-                    observaciones = st.text_area("Observaciones (Incidencias, mermas o diferencias):", value="")
+                c9, c10, c11 = st.columns(3)
+                with c9:
+                    importe_flete = st.number_input("Importe Flete ($):", min_value=0.0, step=50.0)
+                with c10:
+                    remision_pemex = st.text_input("RP (Remisión Pemex) *Obligatoria*:")
+                with c11:
+                    factura_distribuidor = st.text_input("Folio Factura Distribuidor:")
 
-                    submitted_descarga = st.form_submit_button("💾 Guardar y Auditar en Bitácora Real")
+                observaciones = st.text_area("Observaciones (Incidencias, mermas, imprevistos):", value="")
 
-                    if submitted_descarga:
+                submitted_descarga = st.form_submit_button("💾 Guardar Descarga Real en Bitácora")
+
+                if submitted_descarga:
+                    if not remision_pemex:
+                        st.error("⚠️ El campo de Remisión Pemex (RP) es obligatorio para realizar el cruce operativo y fiscal.")
+                    else:
                         cursor = conn.cursor()
                         try:
+                            f_desc_str = fecha_descarga_real.strftime("%Y-%m-%d")
                             f_carga_str = fecha_carga.strftime("%Y-%m-%d")
+                            
                             insert_bitacora = f"""
                                 INSERT INTO bitacora_descargas 
-                                (id_programacion, id_estacion, producto, numero_embarque, fecha_carga, tad_origen, cliente_pemex, destino_codigo, cantidad_natural, cantidad_20c, temperatura, importe_flete, remision_pemex, folio_factura, orden_remision, observaciones, usuario)
+                                (
+                                    id_programacion, id_estacion, producto, fecha_descarga_real,
+                                    numero_embarque, fecha_carga, tad_origen, cliente_pemex,
+                                    destino_num, cantidad_natural, cantidad_20c, temperatura,
+                                    importe_flete, remision_pemex, folio_factura_distribuidor,
+                                    observaciones
+                                )
                                 VALUES 
-                                ({sel_prog_id}, '{estacion_id_sel}', '{row_sel['producto']}', '{num_embarque}', '{f_carga_str}', '{tad_origen}', '{cliente_pemex}', '{destino_codigo}', {cant_natural}, {cant_20c}, {temperatura}, {importe_flete}, '{remision_pemex}', '{folio_factura}', '{orden_remision}', '{observaciones}', '{row_sel["user"]}')
+                                (
+                                    {sel_prog_id_val}, '{estacion_id_sel}', '{producto_descarga}', '{f_desc_str}',
+                                    '{num_embarque}', '{f_carga_str}', '{tad_origen}', '{cliente_pemex}',
+                                    '{destino_num}', {cant_natural}, {cant_20c}, {temperatura},
+                                    {importe_flete}, '{remision_pemex}', '{factura_distribuidor}',
+                                    '{observaciones}'
+                                );
                             """
                             cursor.execute(insert_bitacora)
                             conn.commit()
                             cursor.close()
-                            st.success("✅ ¡Descarga registrada y cruzada correctamente con la Remisión Pemex (RP)!")
+                            st.success("✅ ¡Descarga real registrada y guardada exitosamente en la bitácora!")
                             st.rerun()
                         except Exception as err:
                             conn.rollback()
@@ -126,25 +162,27 @@ def render(conn):
         # PESTAÑA 2: HISTORIAL DE BITÁCORA REAL
         # ==========================================
         with tab2:
-            st.markdown(f"#### 📋 Bitácora de Descargas y Cruce de RP - Estación {estacion_id_sel}")
+            st.markdown(f"#### 📋 Bitácora Histórica de Descargas - Estación {estacion_id_sel}")
             
             try:
                 query_bitacora = f"""
                     SELECT 
-                        b.id,
-                        b.remision_pemex AS "RP",
-                        b.folio_factura AS "Factura Dist.",
-                        b.fecha_carga AS "F. Carga",
-                        b.producto AS "Producto",
-                        b.cantidad_20c AS "Litros @20°C",
-                        b.importe_flete AS "Flete ($)",
-                        b.tad_origen AS "TAD",
-                        b.numero_embarque AS "Embarque",
-                        b.usuario AS "Usuario",
-                        b.registrado_en AS "Registrado"
-                    FROM bitacora_descargas b
-                    WHERE b.id_estacion = '{estacion_id_sel}'
-                    ORDER BY b.fecha_carga DESC;
+                        id AS id_bitacora,
+                        COALESCE(CAST(id_programacion AS VARCHAR), 'EXTRAORDINARIA') AS orden_de_carga,
+                        producto,
+                        fecha_descarga_real AS f_descarga,
+                        remision_pemex AS rp,
+                        folio_factura_distribuidor AS factura,
+                        cantidad_natural AS natural_l,
+                        cantidad_20c AS a_20c_l,
+                        temperatura AS temp,
+                        importe_flete AS flete,
+                        tad_origen AS tad,
+                        numero_embarque AS embarque,
+                        registrado_en
+                    FROM bitacora_descargas
+                    WHERE id_estacion = '{estacion_id_sel}'
+                    ORDER BY fecha_descarga_real DESC, id DESC;
                 """
                 df_bitacora = pd.read_sql(query_bitacora, conn)
                 
