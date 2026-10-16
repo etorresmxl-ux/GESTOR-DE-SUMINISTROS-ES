@@ -19,4 +19,28 @@ menu = st.sidebar.radio(
         "📊 Dashboard Operativo",
         "📅 Matriz de Programación (MRP)",
         "🚛 Administrador de Cargas",
-        "📥
+        "📥 Importar Masivos (CSV)",
+        "📝 Registro de Inventarios", 
+        "📊 Registro de Ventas"
+    ]
+)
+
+conn = init_connection()
+
+if conn:
+    if menu == "📊 Dashboard Operativo":
+        dashboard.render(conn)
+    elif menu == "📅 Matriz de Programación (MRP)":
+        programacion.render(conn)
+    elif menu == "🚛 Administrador de Cargas":
+        administrador_cargas.render(conn)
+    elif menu == "📥 Importar Masivos (CSV)":
+        importador.render(conn)
+    elif menu == "📝 Registro de Inventarios":
+        inventario.render(conn)
+    elif menu == "📊 Registro de Ventas":
+        ventas.render(conn)
+    
+    conn.close()
+else:
+    st.error("No se pudo establecer la conexión con la base de datos.")
