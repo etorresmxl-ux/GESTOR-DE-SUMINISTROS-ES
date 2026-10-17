@@ -115,7 +115,6 @@ def render(conn):
                 try:
                     cursor = conn.cursor()
                     for _, row in df_editado.iterrows():
-                        # Usamos INSERT con ON CONFLICT basado en (estacion_id, fecha)
                         cursor.execute(
                             """
                             INSERT INTO inventarios_historico (estacion_id, fecha, regular, premium, diesel)
@@ -130,6 +129,8 @@ def render(conn):
                     conn.commit()
                     cursor.close()
                     st.success(f"¡Inventarios guardados correctamente para la fecha {fecha_registro}!")
+                    # Forzar recarga inmediata para liberar el estado del formulario de forma limpia
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Error al guardar los registros en la base de datos: {e}")
 
