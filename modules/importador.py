@@ -1,79 +1,117 @@
 import streamlit as st
 import pandas as pd
+import io
+import re
+
+def limpiar_fecha(val):
+    """Convierte cualquier variante de fecha al formato estricto YYYY-MM-DD."""
+    if pd.isna(val) or str(val).strip() == "":
+        return None
+    try:
+        # pd.to_datetime con dayfirst=True tolera dd/mm/yyyy y yyyy-mm-dd dinámicamente
+        dt = pd.to_datetime(val, dayfirst=True, errors='coerce')
+        if pd.isna(dt):
+            return None
+        return dt.strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+def limpiar_numero(val):
+    """Elimina separadores de miles (,), signos de pesos ($) y espacios para retornar float."""
+    if pd.isna(val):
+        return None
+    val_str = str(val).strip()
+    if val_str == "" or val_str.lower() in ["none", "null", "nan", "-"]:
+        return None
+    # Eliminar $, comas y espacios
+    val_limpio = re.sub(r'[^\d.-]', '', val_str)
+    try:
+        return float(val_limpio)
+    except ValueError:
+        return None
+
+def dataframe_a_excel_bytes(df):
+    """Convierte un DataFrame de pandas a un archivo de Excel (.xlsx) en memoria."""
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Plantilla')
+    return output.getvalue()
 
 def render(conn):
-    st.markdown("### 📥 Módulo de Importación de Masivos (CSV)")
-    st.write("Sube tus archivos CSV para actualizar o registrar masivamente la información. Los valores que excedan la capacidad máxima permitida de los tanques se marcarán como vacíos para corrección manual.")
+    st.markdown("### 📥 Módulo de Importación Masiva (Excel / CSV)")
+    st.write("Sube tus archivos de Excel (`.xlsx`) o CSV. El sistema corregirá automáticamente formatos de fecha (ej. `dd/mm/aaaa` ➔ `aaaa-mm-dd`) y limpiará formatos numéricos con comas o texto.")
     
-    tab_inv, tab_ventas, tab_prog = st.tabs(["📦 Inventarios Históricos", "📊 Ventas Históricas", "🚛 Órdenes de Carga (Programación)"])
+    tab_inv, tab_ventas, tab_prog = st.tabs(["📦 Inventarios Históricos", "📊 Ventas Históricas", "🚛 Órdenes de Carga"])
     
+    # ==========================================
     # 1. INVENTARIOS HISTÓRICOS
+    # ==========================================
     with tab_inv:
         st.subheader("Carga de Inventarios Históricos")
         
-        # Plantilla CSV de ejemplo para Inventarios
+        # Plantilla Excel
         df_plantilla_inv = pd.DataFrame(columns=["estacion_id", "fecha", "regular", "premium", "diesel"])
-        csv_inv_bytes = df_plantilla_inv.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 Descargar Plantilla CSV (Inventarios)",
-            data=csv_inv_bytes,
-            file_name="plantilla_inventarios.csv",
-            mime="text/csv",
-            key="descargar_plantilla_inv"
+            label="📥 Descargar Plantilla Excel (Inventarios)",
+            data=dataframe_a_excel_bytes(df_plantilla_inv),
+            file_name="plantilla_inventarios.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="descargar_plantilla_inv_xlsx"
         )
         st.markdown("---")
 
-        file_inv = st.file_uploader("Selecciona el archivo CSV de Inventarios", type=["csv"], key="up_inv_sin_turno")
+        file_inv = st.file_uploader("Selecciona el archivo (Excel o CSV) de Inventarios:", type=["xlsx", "xls", "csv"], key="up_inv_file")
         
         if file_inv is not None:
             try:
-                df_inv = pd.read_csv(file_inv)
-                total_filas = len(df_inv)
+                # Cargar según extensión
+                if file_inv.name.endswith('.csv'):
+                    df_inv = pd.read_csv(file_inv)
+                else:
+                    df_inv = pd.read_excel(file_inv)
                 
-                # Obtener las capacidades máximas reales por estación y producto desde estaciones_detalle
+                # Sanitizar fechas y números
+                df_inv['fecha'] = df_inv['fecha'].apply(limpiar_fecha)
+                for col in ['regular', 'premium', 'diesel']:
+                    if col in df_inv.columns:
+                        df_inv[col] = df_inv[col].apply(limpiar_numero)
+
+                # Validar capacidades máximas
                 cursor = conn.cursor()
                 cursor.execute("SELECT id_estacion, producto, capacidad_maxima FROM estaciones_detalle;")
-                
                 cap_dict = {}
                 for row in cursor.fetchall():
-                    est_id = str(row[0])
-                    prod = str(row[1]).strip().lower()
-                    cap = float(row[2]) if row[2] is not None else 0.0
-                    cap_dict[(est_id, prod)] = cap
+                    cap_dict[(str(row[0]), str(row[1]).strip().lower())] = float(row[2]) if row[2] is not None else 0.0
                 cursor.close()
-                
+
                 advertencias = []
                 for idx, row in df_inv.iterrows():
                     est_id = str(row['estacion_id'])
-                    
-                    for prod_key, prod_col in [('regular', 'regular'), ('premium', 'premium'), ('diesel', 'diesel')]:
-                        if prod_col in df_inv.columns:
-                            val = row[prod_col]
-                            if pd.notna(val):
-                                cap_max = 0.0
-                                for (c_est, c_prod), c_val in cap_dict.items():
-                                    if c_est == est_id and prod_key in c_prod:
-                                        cap_max = c_val
-                                        break
-                                
-                                if cap_max > 0 and val > cap_max:
-                                    df_inv.at[idx, prod_col] = None
-                                    advertencias.append(
-                                        f"⚠️ **Fila {idx + 2} (Estación {est_id})**: El valor de **{prod_key}** ({val:,.0f} L) "
-                                        f"supera la capacidad máxima permitida ({cap_max:,.0f} L). Se ha omitido automáticamente."
-                                    )
-                
-                st.info(f"📊 Archivo cargado. Total de registros: {total_filas}")
-                
+                    for prod_key in ['regular', 'premium', 'diesel']:
+                        if prod_key in df_inv.columns and pd.notna(row[prod_key]):
+                            val = row[prod_key]
+                            cap_max = 0.0
+                            for (c_est, c_prod), c_val in cap_dict.items():
+                                if c_est == est_id and prod_key in c_prod:
+                                    cap_max = c_val
+                                    break
+                            if cap_max > 0 and val > cap_max:
+                                df_inv.at[idx, prod_key] = None
+                                advertencias.append(
+                                    f"⚠️ **Fila {idx + 2} (Estación {est_id})**: El valor de **{prod_key}** ({val:,.0f} L) "
+                                    f"supera la capacidad máxima ({cap_max:,.0f} L). Se omitió automáticamente."
+                                )
+
+                st.info(f"📊 Archivo cargado y sanitizado correctamente. Total de registros: {len(df_inv)}")
                 if advertencias:
-                    st.warning("Se detectaron algunos valores que superan la capacidad máxima de almacenamiento:")
+                    st.warning("Valores omitidos por exceder capacidad:")
                     for adv in advertencias:
                         st.markdown(f"- {adv}")
-                
-                st.write("Vista previa de los datos listos para importar:")
+
+                st.write("Vista previa de los datos limpios a importar:")
                 st.dataframe(df_inv, width='stretch', height=250)
-                
-                if st.button("🚀 Procesar e Importar Inventarios", key="btn_imp_inv_st"):
+
+                if st.button("🚀 Procesar e Importar Inventarios", key="btn_imp_inv"):
                     cursor = conn.cursor()
                     sql_upsert_inv = """
                         INSERT INTO inventarios_historico (estacion_id, fecha, regular, premium, diesel)
@@ -83,49 +121,58 @@ def render(conn):
                                       premium = EXCLUDED.premium,
                                       diesel = EXCLUDED.diesel;
                     """
-                    
                     count = 0
                     for _, row in df_inv.iterrows():
-                        cursor.execute(sql_upsert_inv, (
-                            str(row['estacion_id']),
-                            str(row['fecha']),
-                            float(row['regular']) if 'regular' in df_inv.columns and pd.notna(row['regular']) else None,
-                            float(row['premium']) if 'premium' in df_inv.columns and pd.notna(row['premium']) else None,
-                            float(row['diesel']) if 'diesel' in df_inv.columns and pd.notna(row['diesel']) else None
-                        ))
-                        count += 1
-                        
+                        if pd.notna(row['fecha']):
+                            cursor.execute(sql_upsert_inv, (
+                                str(row['estacion_id']),
+                                str(row['fecha']),
+                                row['regular'] if 'regular' in df_inv.columns else None,
+                                row['premium'] if 'premium' in df_inv.columns else None,
+                                row['diesel'] if 'diesel' in df_inv.columns else None
+                            ))
+                            count += 1
                     conn.commit()
                     cursor.close()
                     st.success(f"¡Se procesaron e importaron {count} registros de inventarios exitosamente!")
             except Exception as e:
                 st.error(f"Error al procesar el archivo: {e}")
 
+    # ==========================================
     # 2. VENTAS HISTÓRICAS
+    # ==========================================
     with tab_ventas:
         st.subheader("Carga de Ventas Históricas")
         
-        # Plantilla CSV de ejemplo para Ventas
         df_plantilla_ventas = pd.DataFrame(columns=["estacion_id", "fecha", "regular", "premium", "diesel"])
-        csv_ventas_bytes = df_plantilla_ventas.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 Descargar Plantilla CSV (Ventas)",
-            data=csv_ventas_bytes,
-            file_name="plantilla_ventas.csv",
-            mime="text/csv",
-            key="descargar_plantilla_ventas"
+            label="📥 Descargar Plantilla Excel (Ventas)",
+            data=dataframe_a_excel_bytes(df_plantilla_ventas),
+            file_name="plantilla_ventas.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="descargar_plantilla_ventas_xlsx"
         )
         st.markdown("---")
 
-        file_ventas = st.file_uploader("Selecciona el archivo CSV de Ventas", type=["csv"], key="up_ventas_csv")
+        file_ventas = st.file_uploader("Selecciona el archivo (Excel o CSV) de Ventas:", type=["xlsx", "xls", "csv"], key="up_ventas_file")
         
         if file_ventas is not None:
             try:
-                df_ventas = pd.read_csv(file_ventas)
-                st.info(f"📊 Archivo cargado. Total de registros: {len(df_ventas)}")
+                if file_ventas.name.endswith('.csv'):
+                    df_ventas = pd.read_csv(file_ventas)
+                else:
+                    df_ventas = pd.read_excel(file_ventas)
+
+                # Sanitizar datos
+                df_ventas['fecha'] = df_ventas['fecha'].apply(limpiar_fecha)
+                for col in ['regular', 'premium', 'diesel']:
+                    if col in df_ventas.columns:
+                        df_ventas[col] = df_ventas[col].apply(limpiar_numero)
+
+                st.info(f"📊 Archivo cargado y sanitizado. Total de registros: {len(df_ventas)}")
                 st.dataframe(df_ventas, width='stretch', height=250)
-                
-                if st.button("🚀 Procesar e Importar Ventas", key="btn_imp_ventas_csv"):
+
+                if st.button("🚀 Procesar e Importar Ventas", key="btn_imp_ventas"):
                     cursor = conn.cursor()
                     sql_upsert_ventas = """
                         INSERT INTO ventas_historico (estacion_id, fecha, regular, premium, diesel)
@@ -137,47 +184,55 @@ def render(conn):
                     """
                     count = 0
                     for _, row in df_ventas.iterrows():
-                        cursor.execute(sql_upsert_ventas, (
-                            str(row['estacion_id']),
-                            str(row['fecha']),
-                            float(row['regular']) if 'regular' in df_ventas.columns and pd.notna(row['regular']) else None,
-                            float(row['premium']) if 'premium' in df_ventas.columns and pd.notna(row['premium']) else None,
-                            float(row['diesel']) if 'diesel' in df_ventas.columns and pd.notna(row['diesel']) else None
-                        ))
-                        count += 1
-                        
+                        if pd.notna(row['fecha']):
+                            cursor.execute(sql_upsert_ventas, (
+                                str(row['estacion_id']),
+                                str(row['fecha']),
+                                row['regular'] if 'regular' in df_ventas.columns else None,
+                                row['premium'] if 'premium' in df_ventas.columns else None,
+                                row['diesel'] if 'diesel' in df_ventas.columns else None
+                            ))
+                            count += 1
                     conn.commit()
                     cursor.close()
                     st.success(f"¡Se procesaron e importaron {count} registros de ventas exitosamente!")
             except Exception as e:
                 st.error(f"Error al procesar el archivo de ventas: {e}")
 
-    # 3. PROGRAMACIÓN DE CARGAS (ÓRDENES DE CARGA)
+    # ==========================================
+    # 3. ÓRDENES DE CARGA (PROGRAMACIÓN)
+    # ==========================================
     with tab_prog:
         st.subheader("Carga Masiva de Órdenes de Carga")
         st.write("Cada fila importada se registrará como una **Orden de Carga** independiente con su propio folio automático.")
         
-        # Plantilla CSV limpia sin la columna 'user'
         df_plantilla_prog = pd.DataFrame(columns=["id_estacion", "producto", "fecha_programacion", "volumen_programado"])
-        csv_prog_bytes = df_plantilla_prog.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 Descargar Plantilla CSV (Órdenes de Carga)",
-            data=csv_prog_bytes,
-            file_name="plantilla_ordenes_carga.csv",
-            mime="text/csv",
-            key="descargar_plantilla_prog"
+            label="📥 Descargar Plantilla Excel (Órdenes de Carga)",
+            data=dataframe_a_excel_bytes(df_plantilla_prog),
+            file_name="plantilla_ordenes_carga.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="descargar_plantilla_prog_xlsx"
         )
         st.markdown("---")
 
-        file_prog = st.file_uploader("Selecciona el archivo CSV de Programación", type=["csv"], key="up_prog_csv")
+        file_prog = st.file_uploader("Selecciona el archivo (Excel o CSV) de Programación:", type=["xlsx", "xls", "csv"], key="up_prog_file")
         
         if file_prog is not None:
             try:
-                df_prog = pd.read_csv(file_prog)
-                st.info(f"📊 Archivo cargado. Total de registros: {len(df_prog)}")
+                if file_prog.name.endswith('.csv'):
+                    df_prog = pd.read_csv(file_prog)
+                else:
+                    df_prog = pd.read_excel(file_prog)
+
+                # Sanitizar datos
+                df_prog['fecha_programacion'] = df_prog['fecha_programacion'].apply(limpiar_fecha)
+                df_prog['volumen_programado'] = df_prog['volumen_programado'].apply(limpiar_numero)
+
+                st.info(f"📊 Archivo cargado y sanitizado. Total de registros: {len(df_prog)}")
                 st.dataframe(df_prog, width='stretch', height=250)
-                
-                if st.button("🚀 Procesar e Importar Órdenes de Carga", key="btn_imp_prog_csv"):
+
+                if st.button("🚀 Procesar e Importar Órdenes de Carga", key="btn_imp_prog"):
                     cursor = conn.cursor()
                     sql_insert_prog = """
                         INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado)
@@ -185,14 +240,14 @@ def render(conn):
                     """
                     count = 0
                     for _, row in df_prog.iterrows():
-                        cursor.execute(sql_insert_prog, (
-                            str(row['id_estacion']),
-                            str(row['producto']),
-                            str(row['fecha_programacion']),
-                            float(row['volumen_programado']) if pd.notna(row['volumen_programado']) else 0.0
-                        ))
-                        count += 1
-                        
+                        if pd.notna(row['fecha_programacion']) and pd.notna(row['volumen_programado']):
+                            cursor.execute(sql_insert_prog, (
+                                str(row['id_estacion']),
+                                str(row['producto']),
+                                str(row['fecha_programacion']),
+                                float(row['volumen_programado'])
+                            ))
+                            count += 1
                     conn.commit()
                     cursor.close()
                     st.success(f"¡Se procesaron e importaron {count} órdenes de carga exitosamente!")
