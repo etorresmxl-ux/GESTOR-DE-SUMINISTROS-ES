@@ -11,7 +11,7 @@ def render(conn):
         return
 
     try:
-        # 1. Consultar estaciones y programadores desde estaciones_detalle
+        # 1. Consultar estaciones y programadores correctamente asegurando el campo "user"
         query_base = """
             SELECT DISTINCT 
                 id_estacion, 
@@ -91,6 +91,12 @@ def render(conn):
 
             st.markdown("#### ✍️ Captura de Datos de la Orden de Carga y Factura")
             
+            # Nota informativa FUERA del formulario para evitar que se meta a la caja azul desalineada
+            if es_manual:
+                st.info("ℹ️ **Modo Manual / Extraordinario:** Esta descarga no está atada a un plan previo en el MRP.")
+            else:
+                st.success(f"🔗 **Vinculado a Orden de Carga #{sel_prog_id_val}** (Volumen planificado: {vol_prog_val:,.0f} L)")
+
             with st.form("form_registrar_descarga_detallada"):
                 col_prod, col_fec_desc = st.columns(2)
                 
@@ -99,16 +105,11 @@ def render(conn):
                         producto_descarga = st.selectbox("Producto Descargado:", ["REGULAR", "PREMIUM", "DIESEL"])
                     with col_fec_desc:
                         fecha_descarga_real = st.date_input("Fecha de Descarga Real:", value=date.today())
-                    
-                    # Mensaje ordenado un renglón más abajo sin romper columnas
-                    st.caption("ℹ️ *Modo Manual / Extraordinario: Esta descarga no está atada a un plan previo en el MRP.*")
                 else:
                     with col_prod:
                         producto_descarga = st.text_input("Producto:", value=producto_default, disabled=True)
                     with col_fec_desc:
                         fecha_descarga_real = st.date_input("Fecha de Descarga Real:", value=date.today())
-                    
-                    st.text_input("Volumen Programado Original (L):", value=f"{vol_prog_val:,.0f} L", disabled=True)
 
                 st.markdown("---")
                 st.markdown("##### ⛽ Datos del Autotanque y Documentos (Pemex / Distribuidor)")
