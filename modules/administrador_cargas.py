@@ -11,19 +11,37 @@ def render(conn):
         return
 
     try:
-        # 1. Selector de Estación
-        query_estaciones = """
-            SELECT DISTINCT id_estacion, nombre, plaza 
-            FROM estaciones_detalle 
-            ORDER BY id_estacion;
+        # 1. Consultar estaciones y programadores desde estaciones_detalle
+        query_base = """
+            SELECT DISTINCT 
+                id_estacion, 
+                nombre AS estacion_nombre, 
+                plaza,
+                COALESCE(NULLIF("user", ''), 'Sin Asignar') AS programador
+            FROM estaciones_detalle
+            ORDER BY programador, plaza, id_estacion;
         """
-        df_est = pd.read_sql(query_estaciones, conn)
-        if df_est.empty:
+        df_estaciones = pd.read_sql(query_base, conn)
+        
+        if df_estaciones.empty:
             st.warning("No hay estaciones registradas.")
             return
 
-        estaciones_lista = [f"{r['id_estacion']} - {r['nombre']} ({r['plaza']})" for _, r in df_est.iterrows()]
-        sel_est = st.selectbox("Selecciona la Estación:", estaciones_lista)
+        # Filtros Superiores: Programador y Estación
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            programadores_disponibles = sorted(df_estaciones['programador'].unique())
+            selected_prog = st.selectbox("Filtrar por Programador / Usuario:", programadores_disponibles)
+            
+        df_filtrado_prog = df_estaciones[df_estaciones['programador'] == selected_prog]
+        
+        with col_f2:
+            estaciones_nombres = [f"{row['id_estacion']} - {row['estacion_nombre']} ({row['plaza']})" for _, row in df_filtrado_prog.iterrows()]
+            if not estaciones_nombres:
+                st.warning("No hay estaciones asignadas a este programador.")
+                return
+            sel_est = st.selectbox("Selecciona la Estación:", estaciones_nombres)
+            
         estacion_id_sel = sel_est.split(" - ")[0]
 
         st.markdown("---")
@@ -74,22 +92,23 @@ def render(conn):
             st.markdown("#### ✍️ Captura de Datos de la Orden de Carga y Factura")
             
             with st.form("form_registrar_descarga_detallada"):
-                col_prod, col_fec_desc, col_vol_sug = st.columns(3)
+                col_prod, col_fec_desc = st.columns(2)
                 
                 if es_manual:
                     with col_prod:
                         producto_descarga = st.selectbox("Producto Descargado:", ["REGULAR", "PREMIUM", "DIESEL"])
                     with col_fec_desc:
                         fecha_descarga_real = st.date_input("Fecha de Descarga Real:", value=date.today())
-                    with col_vol_sug:
-                        st.info("Descarga manual no atada a un plan previo.")
+                    
+                    # Mensaje ordenado un renglón más abajo sin romper columnas
+                    st.caption("ℹ️ *Modo Manual / Extraordinario: Esta descarga no está atada a un plan previo en el MRP.*")
                 else:
                     with col_prod:
                         producto_descarga = st.text_input("Producto:", value=producto_default, disabled=True)
                     with col_fec_desc:
                         fecha_descarga_real = st.date_input("Fecha de Descarga Real:", value=date.today())
-                    with col_vol_sug:
-                        st.text_input("Volumen Programado Original (L):", value=f"{vol_prog_val:,.0f} L", disabled=True)
+                    
+                    st.text_input("Volumen Programado Original (L):", value=f"{vol_prog_val:,.0f} L", disabled=True)
 
                 st.markdown("---")
                 st.markdown("##### ⛽ Datos del Autotanque y Documentos (Pemex / Distribuidor)")
