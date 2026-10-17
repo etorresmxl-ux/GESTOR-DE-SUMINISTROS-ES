@@ -5,7 +5,7 @@ def render(conn):
     st.markdown("### 📥 Módulo de Importación de Masivos (CSV)")
     st.write("Sube tus archivos CSV para actualizar o registrar masivamente la información. Los valores que excedan la capacidad máxima permitida de los tanques se marcarán como vacíos para corrección manual.")
     
-    tab_inv, tab_ventas, tab_prog = st.tabs(["📦 Inventarios Históricos", "📊 Ventas Históricas", "🚛 Programación de Cargas"])
+    tab_inv, tab_ventas, tab_prog = st.tabs(["📦 Inventarios Históricos", "📊 Ventas Históricas", "🚛 Órdenes de Carga (Programación)"])
     
     # 1. INVENTARIOS HISTÓRICOS
     with tab_inv:
@@ -127,7 +127,6 @@ def render(conn):
                 
                 if st.button("🚀 Procesar e Importar Ventas", key="btn_imp_ventas_csv"):
                     cursor = conn.cursor()
-                    # CORRECCIÓN: Cambiado de 'ventas_historicas' a 'ventas_historico'
                     sql_upsert_ventas = """
                         INSERT INTO ventas_historico (estacion_id, fecha, regular, premium, diesel)
                         VALUES (%s, %s, %s, %s, %s)
@@ -153,17 +152,18 @@ def render(conn):
             except Exception as e:
                 st.error(f"Error al procesar el archivo de ventas: {e}")
 
-    # 3. PROGRAMACIÓN DE CARGAS
+    # 3. PROGRAMACIÓN DE CARGAS (ÓRDENES DE CARGA)
     with tab_prog:
-        st.subheader("Carga Masiva de Programación de Cargas (Pedidos)")
+        st.subheader("Carga Masiva de Órdenes de Carga")
+        st.write("Cada fila importada se registrará como una **Orden de Carga** independiente con su propio folio automático.")
         
-        # Plantilla CSV de ejemplo para Programación
-        df_plantilla_prog = pd.DataFrame(columns=["id_estacion", "producto", "fecha_programacion", "volumen_programado", "user"])
+        # Plantilla CSV limpia sin la columna 'user'
+        df_plantilla_prog = pd.DataFrame(columns=["id_estacion", "producto", "fecha_programacion", "volumen_programado"])
         csv_prog_bytes = df_plantilla_prog.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 Descargar Plantilla CSV (Programación)",
+            label="📥 Descargar Plantilla CSV (Órdenes de Carga)",
             data=csv_prog_bytes,
-            file_name="plantilla_programacion.csv",
+            file_name="plantilla_ordenes_carga.csv",
             mime="text/csv",
             key="descargar_plantilla_prog"
         )
@@ -177,11 +177,11 @@ def render(conn):
                 st.info(f"📊 Archivo cargado. Total de registros: {len(df_prog)}")
                 st.dataframe(df_prog, width='stretch', height=250)
                 
-                if st.button("🚀 Procesar e Importar Programación", key="btn_imp_prog_csv"):
+                if st.button("🚀 Procesar e Importar Órdenes de Carga", key="btn_imp_prog_csv"):
                     cursor = conn.cursor()
                     sql_insert_prog = """
-                        INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado, "user")
-                        VALUES (%s, %s, %s, %s, %s);
+                        INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado)
+                        VALUES (%s, %s, %s, %s);
                     """
                     count = 0
                     for _, row in df_prog.iterrows():
@@ -189,13 +189,12 @@ def render(conn):
                             str(row['id_estacion']),
                             str(row['producto']),
                             str(row['fecha_programacion']),
-                            float(row['volumen_programado']) if pd.notna(row['volumen_programado']) else 0.0,
-                            str(row['user']) if 'user' in df_prog.columns and pd.notna(row['user']) else 'Sistema'
+                            float(row['volumen_programado']) if pd.notna(row['volumen_programado']) else 0.0
                         ))
                         count += 1
                         
                     conn.commit()
                     cursor.close()
-                    st.success(f"¡Se procesaron e importaron {count} registros de programación exitosamente!")
+                    st.success(f"¡Se procesaron e importaron {count} órdenes de carga exitosamente!")
             except Exception as e:
                 st.error(f"Error al procesar el archivo de programación: {e}")
