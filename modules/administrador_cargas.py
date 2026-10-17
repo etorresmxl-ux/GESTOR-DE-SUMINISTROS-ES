@@ -55,17 +55,28 @@ def render(conn):
                     f_str = str(r['fecha_programacion']).split("T")[0]
                     opciones_ordenes.append(f"Orden de Carga #{r['orden_carga']} | {r['producto']} | {f_str} | {r['volumen_programado']:,.0f} L")
 
+            # Selector FUERA del formulario para permitir actualización dinámica inmediata
+            sel_orden_str = st.selectbox("Vinculación con Orden de Carga (Plan):", opciones_ordenes)
+            
+            es_manual = sel_orden_str.startswith("--")
+            
+            producto_default = "REGULAR"
+            vol_prog_val = 0.0
+            sel_prog_id_val = "NULL"
+
+            if not es_manual:
+                orden_id_num = int(sel_orden_str.split("#")[1].split(" ")[0])
+                sel_prog_id_val = str(orden_id_num)
+                row_sel = df_prog[df_prog['orden_carga'] == orden_id_num].iloc[0]
+                producto_default = str(row_sel['producto'])
+                vol_prog_val = float(row_sel['volumen_programado']) if pd.notna(row_sel['volumen_programado']) else 0.0
+
             st.markdown("#### ✍️ Captura de Datos de la Orden de Carga y Factura")
             
             with st.form("form_registrar_descarga_detallada"):
-                sel_orden_str = st.selectbox("Vinculación con Orden de Carga (Plan):", opciones_ordenes)
-                
-                es_manual = sel_orden_str.startswith("--")
-                
                 col_prod, col_fec_desc, col_vol_sug = st.columns(3)
                 
                 if es_manual:
-                    sel_prog_id_val = "NULL"
                     with col_prod:
                         producto_descarga = st.selectbox("Producto Descargado:", ["REGULAR", "PREMIUM", "DIESEL"])
                     with col_fec_desc:
@@ -73,17 +84,11 @@ def render(conn):
                     with col_vol_sug:
                         st.info("Descarga manual no atada a un plan previo.")
                 else:
-                    # Extraer ID de la orden seleccionada
-                    orden_id_num = int(sel_orden_str.split("#")[1].split(" ")[0])
-                    sel_prog_id_val = str(orden_id_num)
-                    row_sel = df_prog[df_prog['orden_carga'] == orden_id_num].iloc[0]
-                    
                     with col_prod:
-                        producto_descarga = st.text_input("Producto:", value=str(row_sel['producto']), disabled=True)
+                        producto_descarga = st.text_input("Producto:", value=producto_default, disabled=True)
                     with col_fec_desc:
                         fecha_descarga_real = st.date_input("Fecha de Descarga Real:", value=date.today())
                     with col_vol_sug:
-                        vol_prog_val = float(row_sel['volumen_programado']) if pd.notna(row_sel['volumen_programado']) else 0.0
                         st.text_input("Volumen Programado Original (L):", value=f"{vol_prog_val:,.0f} L", disabled=True)
 
                 st.markdown("---")
