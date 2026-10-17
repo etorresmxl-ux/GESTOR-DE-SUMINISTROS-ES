@@ -1,11 +1,11 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import date
+from datetime import date, datetime
 
 def render(conn):
     st.markdown("### 📊 Dashboard Operativo - Inventarios, Espacio Disponible y Días de Suministro (D/S)")
-    st.write("Resumen general por estación: Inventario actual (con indicador * si es teórico/arrastrado), capacidad máxima, cargas del día y Días de Suministro (VDP 12 semanas).")
+    st.write("Resumen general por estación: Inventario teórico/actualizado al día de hoy (con indicador * si es arrastrado), capacidad máxima, cargas del día y Días de Suministro (VDP 12 semanas).")
     
     query = """
         WITH ultimo_inventario AS (
@@ -64,17 +64,100 @@ def render(conn):
             st.warning("No hay datos suficientes para generar el resumen.")
             return
 
-        hoy_str = date.today().strftime("%Y-%m-%d")
-        
-        # Función auxiliar para determinar si el inventario es teórico (si no es de hoy)
+        hoy = date.today()
+        hoy_str = hoy.strftime("%Y-%m-%d")
+
+        # 1. Consultar descargas reales en bitacora_descargas para ajustar el inventario histórico al día de hoy
+        # Diccionario para sumar descargas reales por estación y producto desde la fecha del inventario hasta hoy
+        descargas_reales = {} # {(estacion_id, producto): volumen_total_descargado}
+        try:
+            query_bitacora_hist = """
+                id_estacion, producto, fecha_descarga_real, cantidad_natural 
+                FROM bitacora_descargas;
+            """
+            # Corrección de formato de consulta segura
+            query_bitacora_hist = """
+                SELECT id_estacion, producto, fecha_descarga_real, cantidad_natural 
+                FROM bitacora_descargas;
+            """
+            df_bit_hist = pd.read_sql(query_bitacora_hist, conn)
+            if not df_bit_hist.empty:
+                for _, rb in df_bit_hist.iterrows():
+                    e_id = str(rb['id_estacion']).strip()
+                    p_raw = str(rb['producto']).strip().lower()
+                    if 'regular' in p_raw or 'magna' in p_raw:
+                        pk = 'regular'
+                    elif 'premium' in p_raw:
+                        pk = 'premium'
+                    elif 'diesel' in p_raw:
+                        pk = 'diesel'
+                    else:
+                        pk = p_raw
+                    
+                    f_desc = pd.to_datetime(rb['fecha_descarga_real']).strftime("%Y-%m-%d")
+                    vol_real = float(rb['cantidad_natural']) if pd.notna(rb['cantidad_natural']) else 0.0
+                    
+                    key = (e_id, pk, f_desc)
+                    descargas_reales[key] = descargas_reales.get(key, 0.0) + vol_real
+        except Exception as e:
+            pass
+
+        # 2. Ajustar el inventario de cada estación descontando ventas y sumando descargas reales transcurridas
+        inventarios_actualizados_reg = []
+        inventarios_actualizados_pre = []
+        inventarios_actualizados_die = []
+
+        for _, r in df.iterrows():
+            est_id = str(r['id_estacion']).strip()
+            f_inv = r['fecha_inventario']
+            
+            if pd.isna(f_inv):
+                inventarios_actualizados_reg.append(0.0)
+                inventarios_actualizados_pre.append(0.0)
+                inventarios_actualizados_die.append(0.0)
+                continue
+                
+            f_inv_date = pd.to_datetime(f_inv).date()
+            
+            # Si la fecha del inventario es hoy o futura, se queda igual; si es pasada, proyectamos día por día
+            dias_transcurridos = (hoy - f_inv_date).days
+            
+            # Valores base
+            inv_r = float(r['reg_litros'])
+            inv_p = float(r['pre_litros'])
+            inv_d = float(r['die_litros'])
+            
+            vdp_r = float(r['vdp_reg'])
+            vdp_p = float(r['vdp_pre'])
+            vdp_d = float(r['vdp_die'])
+
+            # Simular el desgaste y entradas día por día desde el día posterior al inventario hasta hoy
+            if dias_transcurridos > 0:
+                current_date = f_inv_date
+                for _ in range(dias_transcurridos):
+                    current_date = current_date + pd.Timedelta(days=1)
+                    curr_str = current_date.strftime("%Y-%m-%d")
+                    
+                    # Descontar VDP y sumar descargas reales de ese día específico
+                    inv_r = inv_r - vdp_r + descargas_reales.get((est_id, 'regular', curr_str), 0.0)
+                    inv_p = inv_p - vdp_p + descargas_reales.get((est_id, 'premium', curr_str), 0.0)
+                    inv_d = inv_d - vdp_d + descargas_reales.get((est_id, 'diesel', curr_str), 0.0)
+            
+            # Evitar negativos lógicos
+            inventarios_actualizados_reg.append(max(0.0, inv_r))
+            inventarios_actualizados_pre.append(max(0.0, inv_p))
+            inventarios_actualizados_die.append(max(0.0, inv_d))
+
+        df['reg_litros_calc'] = inventarios_actualizados_reg
+        df['pre_litros_calc'] = inventarios_actualizados_pre
+        df['die_litros_calc'] = inventarios_actualizados_die
+
+        # Función auxiliar para determinar si el inventario es teórico (si el último registro físico no es de hoy)
         def formato_inv(litros, fecha_inv):
             if pd.isna(fecha_inv):
                 return "N/A", True
-            
-            # Convertir fecha_inv a string YYYY-MM-DD para comparar
             f_str = pd.to_datetime(fecha_inv).strftime("%Y-%m-%d")
             es_teorico = f_str < hoy_str
-            
             prefijo = "*" if es_teorico else ""
             return f"{prefijo}{litros:,.0f} L", es_teorico
 
@@ -104,15 +187,15 @@ def render(conn):
         except Exception as e:
             pass
 
-        # Calcular días de suministro actuales
-        df['ds_r'] = df.apply(lambda r: round(r['reg_litros'] / r['vdp_reg'], 1) if r['cap_regular'] > 0 and r['vdp_reg'] > 0 else np.nan, axis=1)
-        df['ds_p'] = df.apply(lambda r: round(r['pre_litros'] / r['vdp_pre'], 1) if r['cap_premium'] > 0 and r['vdp_pre'] > 0 else np.nan, axis=1)
-        df['ds_d'] = df.apply(lambda r: round(r['die_litros'] / r['vdp_die'], 1) if r['cap_diesel'] > 0 and r['vdp_die'] > 0 else np.nan, axis=1)
+        # Calcular días de suministro actuales utilizando el inventario proyectado a hoy
+        df['ds_r'] = df.apply(lambda r: round(r['reg_litros_calc'] / r['vdp_reg'], 1) if r['cap_regular'] > 0 and r['vdp_reg'] > 0 else np.nan, axis=1)
+        df['ds_p'] = df.apply(lambda r: round(r['pre_litros_calc'] / r['vdp_pre'], 1) if r['cap_premium'] > 0 and r['vdp_pre'] > 0 else np.nan, axis=1)
+        df['ds_d'] = df.apply(lambda r: round(r['die_litros_calc'] / r['vdp_die'], 1) if r['cap_diesel'] > 0 and r['vdp_die'] > 0 else np.nan, axis=1)
 
         # Calcular espacio disponible
-        df['espacio_r'] = df.apply(lambda r: max(0, r['cap_regular'] - r['reg_litros']) if r['cap_regular'] > 0 else np.nan, axis=1)
-        df['espacio_p'] = df.apply(lambda r: max(0, r['cap_premium'] - r['pre_litros']) if r['cap_premium'] > 0 else np.nan, axis=1)
-        df['espacio_d'] = df.apply(lambda r: max(0, r['cap_diesel'] - r['die_litros']) if r['cap_diesel'] > 0 else np.nan, axis=1)
+        df['espacio_r'] = df.apply(lambda r: max(0, r['cap_regular'] - r['reg_litros_calc']) if r['cap_regular'] > 0 else np.nan, axis=1)
+        df['espacio_p'] = df.apply(lambda r: max(0, r['cap_premium'] - r['pre_litros_calc']) if r['cap_premium'] > 0 else np.nan, axis=1)
+        df['espacio_d'] = df.apply(lambda r: max(0, r['cap_diesel'] - r['die_litros_calc']) if r['cap_diesel'] > 0 else np.nan, axis=1)
 
         # ==========================================
         # 1. CENTRO DE ALERTAS PRIORIZADAS
@@ -125,9 +208,9 @@ def render(conn):
             f_inv = r['fecha_inventario']
             
             productos = [
-                ('Regular', r['ds_r'], r['reg_litros'], r['cap_regular'], r['espacio_r'], r['vdp_reg'], 'regular'), 
-                ('Premium', r['ds_p'], r['pre_litros'], r['cap_premium'], r['espacio_p'], r['vdp_pre'], 'premium'), 
-                ('Diesel', r['ds_d'], r['die_litros'], r['cap_diesel'], r['espacio_d'], r['vdp_die'], 'diesel')
+                ('Regular', r['ds_r'], r['reg_litros_calc'], r['cap_regular'], r['espacio_r'], r['vdp_reg'], 'regular'), 
+                ('Premium', r['ds_p'], r['pre_litros_calc'], r['cap_premium'], r['espacio_p'], r['vdp_pre'], 'premium'), 
+                ('Diesel', r['ds_d'], r['die_litros_calc'], r['cap_diesel'], r['espacio_d'], r['vdp_die'], 'diesel')
             ]
             
             for prod, ds, litros, cap, espacio, vdp, p_key in productos:
@@ -138,7 +221,6 @@ def render(conn):
                         
                         str_inv_actual, _ = formato_inv(litros, f_inv)
                         
-                        # Buscar carga programada exclusivamente para HOY
                         vol_carga_hoy = cargas_hoy.get((est_id, p_key), 0.0)
                         
                         if vol_carga_hoy > 0:
@@ -213,9 +295,9 @@ def render(conn):
             "Plaza": df['plaza'].astype(str),
             "Estación": df['estacion'].astype(str),
             
-            "REGULAR (Inv / D/S)": df.apply(lambda r: formatear_celda_general(r['reg_litros'], r['ds_r'], r['cap_regular'], r['fecha_inventario']), axis=1),
-            "PREMIUM (Inv / D/S)": df.apply(lambda r: formatear_celda_general(r['pre_litros'], r['ds_p'], r['cap_premium'], r['fecha_inventario']), axis=1),
-            "DIESEL (Inv / D/S)": df.apply(lambda r: formatear_celda_general(r['die_litros'], r['ds_d'], r['cap_diesel'], r['fecha_inventario']), axis=1),
+            "REGULAR (Inv / D/S)": df.apply(lambda r: formatear_celda_general(r['reg_litros_calc'], r['ds_r'], r['cap_regular'], r['fecha_inventario']), axis=1),
+            "PREMIUM (Inv / D/S)": df.apply(lambda r: formatear_celda_general(r['pre_litros_calc'], r['ds_p'], r['cap_premium'], r['fecha_inventario']), axis=1),
+            "DIESEL (Inv / D/S)": df.apply(lambda r: formatear_celda_general(r['die_litros_calc'], r['ds_d'], r['cap_diesel'], r['fecha_inventario']), axis=1),
         })
 
         st.dataframe(tabla_vis, width='stretch', height=450, hide_index=True)
