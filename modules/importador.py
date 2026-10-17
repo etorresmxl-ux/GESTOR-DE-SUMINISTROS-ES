@@ -4,11 +4,9 @@ import io
 import re
 
 def limpiar_fecha(val):
-    """Convierte cualquier variante de fecha al formato estricto YYYY-MM-DD."""
     if pd.isna(val) or str(val).strip() == "":
         return None
     try:
-        # pd.to_datetime con dayfirst=True tolera dd/mm/yyyy y yyyy-mm-dd dinámicamente
         dt = pd.to_datetime(val, dayfirst=True, errors='coerce')
         if pd.isna(dt):
             return None
@@ -17,21 +15,22 @@ def limpiar_fecha(val):
         return None
 
 def limpiar_numero(val):
-    """Elimina separadores de miles (,), signos de pesos ($) y espacios para retornar float."""
+    """Limpia el número, elimina caracteres extra y convierte 0 o 0.0 en None (NULL)."""
     if pd.isna(val):
         return None
     val_str = str(val).strip()
     if val_str == "" or val_str.lower() in ["none", "null", "nan", "-"]:
         return None
-    # Eliminar $, comas y espacios
     val_limpio = re.sub(r'[^\d.-]', '', val_str)
     try:
-        return float(val_limpio)
+        num = float(val_limpio)
+        if pd.isna(num) or num == 0.0:
+            return None
+        return num
     except ValueError:
         return None
 
 def dataframe_a_excel_bytes(df):
-    """Convierte un DataFrame de pandas a un archivo de Excel (.xlsx) en memoria."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Plantilla')
@@ -39,7 +38,7 @@ def dataframe_a_excel_bytes(df):
 
 def render(conn):
     st.markdown("### 📥 Módulo de Importación Masiva (Excel / CSV)")
-    st.write("Sube tus archivos de Excel (`.xlsx`) o CSV. El sistema corregirá automáticamente formatos de fecha (ej. `dd/mm/aaaa` ➔ `aaaa-mm-dd`) y limpiará formatos numéricos con comas o texto.")
+    st.write("Sube tus archivos de Excel (`.xlsx`) o CSV. El sistema corregirá automáticamente formatos de fecha, valores numéricos y convertirá los ceros en nulos (`NULL`).")
     
     tab_inv, tab_ventas, tab_prog = st.tabs(["📦 Inventarios Históricos", "📊 Ventas Históricas", "🚛 Órdenes de Carga"])
     
@@ -49,7 +48,6 @@ def render(conn):
     with tab_inv:
         st.subheader("Carga de Inventarios Históricos")
         
-        # Plantilla Excel
         df_plantilla_inv = pd.DataFrame(columns=["estacion_id", "fecha", "regular", "premium", "diesel"])
         st.download_button(
             label="📥 Descargar Plantilla Excel (Inventarios)",
@@ -64,19 +62,16 @@ def render(conn):
         
         if file_inv is not None:
             try:
-                # Cargar según extensión
                 if file_inv.name.endswith('.csv'):
                     df_inv = pd.read_csv(file_inv)
                 else:
                     df_inv = pd.read_excel(file_inv)
                 
-                # Sanitizar fechas y números
                 df_inv['fecha'] = df_inv['fecha'].apply(limpiar_fecha)
                 for col in ['regular', 'premium', 'diesel']:
                     if col in df_inv.columns:
                         df_inv[col] = df_inv[col].apply(limpiar_numero)
 
-                # Validar capacidades máximas
                 cursor = conn.cursor()
                 cursor.execute("SELECT id_estacion, producto, capacidad_maxima FROM estaciones_detalle;")
                 cap_dict = {}
@@ -123,13 +118,17 @@ def render(conn):
                     """
                     count = 0
                     for _, row in df_inv.iterrows():
-                        if pd.notna(row['fecha']):
+                        if pd.notna(row['fecha']) and str(row['estacion_id']).strip() != "":
+                            reg_val = float(row['regular']) if 'regular' in df_inv.columns and pd.notna(row['regular']) else None
+                            pre_val = float(row['premium']) if 'premium' in df_inv.columns and pd.notna(row['premium']) else None
+                            die_val = float(row['diesel']) if 'diesel' in df_inv.columns and pd.notna(row['diesel']) else None
+
                             cursor.execute(sql_upsert_inv, (
-                                str(row['estacion_id']),
+                                str(row['estacion_id']).strip(),
                                 str(row['fecha']),
-                                row['regular'] if 'regular' in df_inv.columns else None,
-                                row['premium'] if 'premium' in df_inv.columns else None,
-                                row['diesel'] if 'diesel' in df_inv.columns else None
+                                reg_val,
+                                pre_val,
+                                die_val
                             ))
                             count += 1
                     conn.commit()
@@ -163,7 +162,6 @@ def render(conn):
                 else:
                     df_ventas = pd.read_excel(file_ventas)
 
-                # Sanitizar datos
                 df_ventas['fecha'] = df_ventas['fecha'].apply(limpiar_fecha)
                 for col in ['regular', 'premium', 'diesel']:
                     if col in df_ventas.columns:
@@ -184,13 +182,17 @@ def render(conn):
                     """
                     count = 0
                     for _, row in df_ventas.iterrows():
-                        if pd.notna(row['fecha']):
+                        if pd.notna(row['fecha']) and str(row['estacion_id']).strip() != "":
+                            reg_val = float(row['regular']) if 'regular' in df_ventas.columns and pd.notna(row['regular']) else None
+                            pre_val = float(row['premium']) if 'premium' in df_ventas.columns and pd.notna(row['premium']) else None
+                            die_val = float(row['diesel']) if 'diesel' in df_ventas.columns and pd.notna(row['diesel']) else None
+
                             cursor.execute(sql_upsert_ventas, (
-                                str(row['estacion_id']),
+                                str(row['estacion_id']).strip(),
                                 str(row['fecha']),
-                                row['regular'] if 'regular' in df_ventas.columns else None,
-                                row['premium'] if 'premium' in df_ventas.columns else None,
-                                row['diesel'] if 'diesel' in df_ventas.columns else None
+                                reg_val,
+                                pre_val,
+                                die_val
                             ))
                             count += 1
                     conn.commit()
@@ -225,7 +227,6 @@ def render(conn):
                 else:
                     df_prog = pd.read_excel(file_prog)
 
-                # Sanitizar datos
                 df_prog['fecha_programacion'] = df_prog['fecha_programacion'].apply(limpiar_fecha)
                 df_prog['volumen_programado'] = df_prog['volumen_programado'].apply(limpiar_numero)
 
@@ -240,12 +241,13 @@ def render(conn):
                     """
                     count = 0
                     for _, row in df_prog.iterrows():
-                        if pd.notna(row['fecha_programacion']) and pd.notna(row['volumen_programado']):
+                        if pd.notna(row['fecha_programacion']) and pd.notna(row['volumen_programado']) and str(row['id_estacion']).strip() != "":
+                            vol_val = float(row['volumen_programado'])
                             cursor.execute(sql_insert_prog, (
-                                str(row['id_estacion']),
-                                str(row['producto']),
+                                str(row['id_estacion']).strip(),
+                                str(row['producto']).strip(),
                                 str(row['fecha_programacion']),
-                                float(row['volumen_programado'])
+                                vol_val
                             ))
                             count += 1
                     conn.commit()
