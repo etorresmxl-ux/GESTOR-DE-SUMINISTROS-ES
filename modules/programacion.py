@@ -10,6 +10,11 @@ def render(conn):
         st.error("No hay conexión a la base de datos.")
         return
 
+    # Notificación persistente tras recarga (st.rerun)
+    if "mensaje_exito_orden" in st.session_state:
+        st.success(st.session_state["mensaje_exito_orden"])
+        del st.session_state["mensaje_exito_orden"]
+
     try:
         # 1. Consultar estaciones y programadores desde estaciones_detalle
         query_base = """
@@ -221,7 +226,7 @@ def render(conn):
             st.write("Crea órdenes independientes (soporta múltiples cargas el mismo día). **Candado activo:** No se permiten fechas de programación pasadas.")
 
             # Formulario de alta
-            with st.form("form_crear_orden_carga"):
+            with st.form("form_crear_orden_carga", clear_on_submit=True):
                 st.markdown("##### ➕ Registrar Nueva Orden de Carga")
                 c1, c2, c3 = st.columns(3)
                 with c1:
@@ -232,26 +237,30 @@ def render(conn):
                     # Candado: min_value es hoy
                     sel_fecha_alta = st.date_input("Fecha de Programación:", value=date.today(), min_value=date.today())
                 with c3:
-                    sel_vol_alta = st.number_input("Volumen (Litros):", min_value=100.0, value=20000.0, step=100.0)
+                    sel_vol_alta = st.number_input("Volumen (Litros):", min_value=0.0, value=0.0, step=100.0)
 
                 submitted_alta = st.form_submit_button("🚀 Generar Orden de Carga")
                 if submitted_alta:
-                    cursor = conn.cursor()
-                    try:
-                        f_str = sel_fecha_alta.strftime("%Y-%m-%d")
-                        insert_query = f"""
-                            INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado)
-                            VALUES ('{estacion_id_sel}', '{sel_prod_alta}', '{f_str}', {sel_vol_alta});
-                        """
-                        cursor.execute(insert_query)
-                        conn.commit()
-                        cursor.close()
-                        st.success("✅ ¡Orden de Carga generada con éxito!")
-                        st.rerun()
-                    except Exception as err:
-                        conn.rollback()
-                        cursor.close()
-                        st.error(f"Error al registrar la orden: {err}")
+                    if sel_vol_alta <= 0:
+                        st.warning("⚠️ Por favor ingresa un volumen mayor a 0 litros.")
+                    else:
+                        cursor = conn.cursor()
+                        try:
+                            f_str = sel_fecha_alta.strftime("%Y-%m-%d")
+                            insert_query = f"""
+                                INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado)
+                                VALUES ('{estacion_id_sel}', '{sel_prod_alta}', '{f_str}', {sel_vol_alta});
+                            """
+                            cursor.execute(insert_query)
+                            conn.commit()
+                            cursor.close()
+                            
+                            st.session_state["mensaje_exito_orden"] = f"✅ ¡Orden de Carga registrada exitosamente! ({sel_prod_alta} - {sel_vol_alta:,.0f} L para {f_str})"
+                            st.rerun()
+                        except Exception as err:
+                            conn.rollback()
+                            cursor.close()
+                            st.error(f"Error al registrar la orden: {err}")
 
             st.markdown("---")
             st.markdown("##### 🔍 Órdenes de Carga Registradas (Vigentes y Futuras)")
@@ -307,7 +316,7 @@ def render(conn):
                                 cursor.execute(q_upd)
                                 conn.commit()
                                 cursor.close()
-                                st.success(f"✅ Orden de Carga #{sel_orden_id} actualizada correctamente.")
+                                st.session_state["mensaje_exito_orden"] = f"✅ Orden de Carga #{sel_orden_id} actualizada correctamente."
                                 st.rerun()
                             except Exception as e_upd:
                                 conn.rollback()
@@ -317,19 +326,4 @@ def render(conn):
                         if submitted_delete:
                             cursor = conn.cursor()
                             try:
-                                q_del = f"DELETE FROM programacion_cargas WHERE id = {sel_orden_id};"
-                                cursor.execute(q_del)
-                                conn.commit()
-                                cursor.close()
-                                st.success(f"🗑️ Orden de Carga #{sel_orden_id} eliminada del sistema.")
-                                st.rerun()
-                            except Exception as e_del:
-                                conn.rollback()
-                                cursor.close()
-                                st.error(f"Error al eliminar: {e_del}")
-
-            except Exception as e_ord:
-                st.warning(f"Error al consultar las órdenes de carga: {e_ord}")
-
-    except Exception as e:
-        st.error(f"Error en la matriz de programación: {e}")
+                                q_del = f"DELETE FROM programacion_cargas WHERE id = {sel_orden_id
