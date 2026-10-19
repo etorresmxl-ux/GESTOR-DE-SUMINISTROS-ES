@@ -9,10 +9,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("⛽ Sistema de Gestión de Suministro e Inventarios")
-st.markdown("---")
-
-# Menú lateral fijo mediante radio buttons con el nuevo orden solicitado
+# Menú lateral fijo mediante radio buttons con el orden solicitado
 st.sidebar.title("Navegación")
 menu = st.sidebar.radio(
     "Selecciona un Módulo",
