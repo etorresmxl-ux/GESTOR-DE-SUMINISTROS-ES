@@ -2,6 +2,70 @@ import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
 
+DIAS_SEMANA = ['lun.', 'mar.', 'mié.', 'jue.', 'vie.', 'sáb.', 'dom.']
+MESES = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.']
+PRODUCTOS_ORDEN = ["REGULAR", "PREMIUM", "DIESEL"]
+COLOR_PRODUCTO = {"REGULAR": "#1e8449", "PREMIUM": "#d35400", "DIESEL": "#5d6d7e"}
+
+
+def _clave_producto(texto):
+    p = str(texto).strip().lower()
+    if 'regular' in p or 'magna' in p:
+        return "REGULAR"
+    if 'premium' in p:
+        return "PREMIUM"
+    if 'diesel' in p:
+        return "DIESEL"
+    return str(texto).strip().upper()
+
+
+def _etiqueta_fecha(f):
+    return f"{DIAS_SEMANA[f.weekday()]} {f.day:02d}-{MESES[f.month - 1]}"
+
+
+def construir_calendario(df_ordenes, productos_estacion, hoy, dias_minimos=14, dias_maximos=45):
+    """
+    Calendario de cargas registradas: una fila por producto, una columna por día,
+    con el volumen programado (si hay varias cargas el mismo día, se suman).
+    Muestra al menos `dias_minimos` días desde hoy y se amplía hasta la última orden
+    (máximo `dias_maximos`). Devuelve (tabla, ordenes_fuera_de_rango).
+    """
+    o = df_ordenes.copy()
+    o["fecha"] = pd.to_datetime(o["fecha_programacion"]).dt.date
+    o["prod"] = o["producto"].map(_clave_producto)
+    o["vol"] = pd.to_numeric(o["volumen_programado"], errors="coerce").fillna(0.0)
+
+    dias = min(max(dias_minimos, (o["fecha"].max() - hoy).days + 1), dias_maximos)
+    fechas = [hoy + timedelta(days=i) for i in range(dias)]
+    fuera = int((o["fecha"] > fechas[-1]).sum())
+
+    con_ordenes = set(o["prod"])
+    productos = [p for p in PRODUCTOS_ORDEN if p in productos_estacion or p in con_ordenes] or PRODUCTOS_ORDEN
+    totales = o.groupby(["prod", "fecha"])["vol"].sum()
+
+    tabla = pd.DataFrame("", index=[p.capitalize() for p in productos],
+                         columns=[_etiqueta_fecha(f) for f in fechas])
+    for p in productos:
+        for f in fechas:
+            v = totales.get((p, f), 0.0)
+            if v > 0:
+                tabla.loc[p.capitalize(), _etiqueta_fecha(f)] = f"{v:,.0f}"
+    return tabla, fuera
+
+
+def estilo_calendario(tabla):
+    """Pinta solo las celdas con carga, con el color de cada producto."""
+    def pintar(_):
+        css = pd.DataFrame("", index=tabla.index, columns=tabla.columns)
+        for etiqueta in tabla.index:
+            color = COLOR_PRODUCTO.get(etiqueta.upper(), "#5d6d7e")
+            for col in tabla.columns:
+                if tabla.loc[etiqueta, col]:
+                    css.loc[etiqueta, col] = f"background-color: {color}; color: #ffffff; font-weight: 600;"
+        return css
+    return tabla.style.apply(pintar, axis=None)
+
+
 def render(conn):
     st.markdown("### 🚛 Matriz de Programación y Gestión de Órdenes")
     st.write("Administra de forma independiente cada Orden de Carga (Folio) y visualiza el resumen consolidado a 14 días.")
@@ -276,13 +340,33 @@ def render(conn):
                 if df_ordenes.empty:
                     st.info("No hay órdenes de carga activas para esta estación.")
                 else:
-                    st.dataframe(df_ordenes, width='stretch', hide_index=True)
+                    calendario, fuera_de_rango = construir_calendario(
+                        df_ordenes, {p.upper() for p in productos_disponibles_estacion}, date.today()
+                    )
+                    st.caption("Volumen programado por día y producto (si hay varias cargas el mismo día, se suman).")
+                    st.dataframe(estilo_calendario(calendario), width='stretch')
+                    if fuera_de_rango:
+                        st.caption(f"Hay {fuera_de_rango} orden(es) más allá del rango mostrado; consúltalas en el detalle por folio.")
+                    with st.expander("Ver detalle por folio"):
+                        st.dataframe(df_ordenes, width='stretch', hide_index=True)
 
                     st.markdown("##### ⚙️ Modificar o Eliminar una Orden de Carga")
                     col_id_sel, col_acc = st.columns(2)
                     with col_id_sel:
                         ids_disponibles = df_ordenes['orden_carga'].tolist()
-                        sel_orden_id = st.selectbox("Selecciona el Folio (Orden de Carga) a administrar:", ids_disponibles)
+                        etiquetas_ordenes = {
+                            int(r.orden_carga): (
+                                f"#{int(r.orden_carga)} · {r.producto} · "
+                                f"{_etiqueta_fecha(pd.to_datetime(r.fecha_programacion).date())} · "
+                                f"{float(r.volumen_programado or 0):,.0f} L"
+                            )
+                            for r in df_ordenes.itertuples()
+                        }
+                        sel_orden_id = st.selectbox(
+                            "Selecciona el Folio (Orden de Carga) a administrar:",
+                            ids_disponibles,
+                            format_func=lambda i: etiquetas_ordenes.get(int(i), str(i)),
+                        )
                     
                     row_orden_act = df_ordenes[df_ordenes['orden_carga'] == sel_orden_id].iloc[0]
 
