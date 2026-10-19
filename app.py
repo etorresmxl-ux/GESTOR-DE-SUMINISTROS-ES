@@ -1,4 +1,5 @@
 import streamlit as st
+from datetime import datetime, timezone, timedelta
 from database import init_connection
 from modules import inventario, ventas, importador, dashboard, programacion, administrador_cargas
 
@@ -23,6 +24,22 @@ menu = st.sidebar.radio(
         "📝 Registro de Inventarios", 
         "📊 Registro de Ventas"
     ]
+)
+
+# ==========================================
+# INDICADOR PERMANENTE DE FECHA Y HORA DEL SISTEMA
+# ==========================================
+tz_local = timezone(timedelta(hours=-7))
+ahora_local = datetime.now(tz_local)
+
+st.sidebar.markdown("---")
+st.sidebar.markdown(
+    f"<div style='text-align: center; color: #aaa; font-size: 0.85em; padding: 5px;'>"
+    f"🕒 <b>Reloj del Sistema</b><br>"
+    f"📅 {ahora_local.strftime('%Y-%m-%d')}<br>"
+    f"⏱️ {ahora_local.strftime('%H:%M:%S')} (UTC-7)"
+    f"</div>",
+    unsafe_allow_html=True
 )
 
 conn = init_connection()
