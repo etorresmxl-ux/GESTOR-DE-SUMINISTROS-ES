@@ -205,8 +205,8 @@ def render(conn):
     # 3. ÓRDENES DE CARGA (PROGRAMACIÓN)
     # ==========================================
     with tab_prog:
-        st.subheader("Carga Masiva de Órdenes de Carga")
-        st.write("Cada fila importada se registrará como una **Orden de Carga** independiente con su propio folio automático.")
+        st.subheader("Carga de Órdenes de Carga")
+        st.write("Cada fila importada se agregará como una nueva orden de carga independiente con su propio folio automático, sin afectar los registros existentes.")
         
         df_plantilla_prog = pd.DataFrame(columns=["id_estacion", "producto", "fecha_programacion", "volumen_programado"])
         st.download_button(
@@ -233,7 +233,7 @@ def render(conn):
                 st.info(f"📊 Archivo cargado y sanitizado. Total de registros: {len(df_prog)}")
                 st.dataframe(df_prog, width='stretch', height=250)
 
-                if st.button("🚀 Procesar e Importar Órdenes de Carga", key="btn_imp_prog"):
+                if st.button("🚀 Registrar Órdenes de Carga", key="btn_imp_prog"):
                     cursor = conn.cursor()
                     sql_insert_prog = """
                         INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado)
@@ -252,6 +252,6 @@ def render(conn):
                             count += 1
                     conn.commit()
                     cursor.close()
-                    st.success(f"¡Se procesaron e importaron {count} órdenes de carga exitosamente!")
+                    st.success(f"¡Se registraron {count} órdenes de carga exitosamente!")
             except Exception as e:
                 st.error(f"Error al procesar el archivo de programación: {e}")
