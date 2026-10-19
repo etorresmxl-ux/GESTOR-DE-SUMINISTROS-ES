@@ -121,7 +121,7 @@ def render(conn):
                         descargas_reales[key] = descargas_reales.get(key, 0.0) + vol_real
         except Exception as e:
             try:
-                conn.rollback() # Limpiar estado de transacción si la tabla no existe o falla
+                conn.rollback()
             except:
                 pass
 
@@ -177,7 +177,7 @@ def render(conn):
             prefijo = "*" if es_teorico else ""
             return f"{prefijo}{litros:,.0f} L", es_teorico
 
-        # Consultar cargas programadas para el DÍA DE HOY de forma segura (con rollback preventivo)
+        # Consultar cargas programadas para el DÍA DE HOY de forma segura
         cargas_hoy = {} # {(estacion_id, producto_key): volumen_total_programado_hoy}
         try:
             query_cargas = f"""
@@ -203,7 +203,7 @@ def render(conn):
         # Calcular días de suministro actuales utilizando el inventario proyectado a hoy
         df['ds_r'] = df.apply(lambda r: round(r['reg_litros_calc'] / r['vdp_reg'], 1) if r['cap_regular'] > 0 and r['vdp_reg'] > 0 else np.nan, axis=1)
         df['ds_p'] = df.apply(lambda r: round(r['pre_litros_calc'] / r['vdp_pre'], 1) if r['cap_premium'] > 0 and r['vdp_pre'] > 0 else np.nan, axis=1)
-        df['ds_d'] = df.apply(lambda r: round(r['die_litros_calc'] / r['vdp_die'], 1) if r['cap_diesel'] > 0 and r['vdp_diesel'] > 0 else np.nan, axis=1)
+        df['ds_d'] = df.apply(lambda r: round(r['die_litros_calc'] / r['vdp_die'], 1) if r['cap_diesel'] > 0 and r['vdp_die'] > 0 else np.nan, axis=1)
 
         # Calcular espacio disponible
         df['espacio_r'] = df.apply(lambda r: max(0, r['cap_regular'] - r['reg_litros_calc']) if r['cap_regular'] > 0 else np.nan, axis=1)
