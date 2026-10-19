@@ -15,7 +15,7 @@ def limpiar_fecha(val):
         return None
 
 def limpiar_numero(val):
-    """Limpia el número, elimina caracteres extra y convierte 0 o 0.0 en None (NULL)."""
+    """Limpia el número, elimina caracteres extra y convierte 0 o celdas vacías en None (NULL)."""
     if pd.isna(val):
         return None
     val_str = str(val).strip()
@@ -38,7 +38,7 @@ def dataframe_a_excel_bytes(df):
 
 def render(conn):
     st.markdown("### 📥 Módulo de Importación Masiva (Excel / CSV)")
-    st.write("Sube tus archivos de Excel (`.xlsx`) o CSV. El sistema corregirá automáticamente formatos de fecha, valores numéricos y convertirá los ceros en nulos (`NULL`).")
+    st.write("Sube tus archivos de Excel (`.xlsx`) o CSV. Los valores vacíos o en ceros **no sobrescribirán** los datos existentes; el sistema conservará los valores previos si no se proporciona un dato nuevo.")
     
     tab_inv, tab_ventas, tab_prog = st.tabs(["📦 Inventarios Históricos", "📊 Ventas Históricas", "🚛 Órdenes de Carga"])
     
@@ -108,13 +108,14 @@ def render(conn):
 
                 if st.button("🚀 Procesar e Importar Inventarios", key="btn_imp_inv"):
                     cursor = conn.cursor()
+                    # COALESCE preserva el valor actual de la tabla si el dato entrante es NULL
                     sql_upsert_inv = """
                         INSERT INTO inventarios_historico (estacion_id, fecha, regular, premium, diesel)
                         VALUES (%s, %s, %s, %s, %s)
                         ON CONFLICT (estacion_id, fecha) 
-                        DO UPDATE SET regular = EXCLUDED.regular,
-                                      premium = EXCLUDED.premium,
-                                      diesel = EXCLUDED.diesel;
+                        DO UPDATE SET regular = COALESCE(EXCLUDED.regular, inventarios_historico.regular),
+                                      premium = COALESCE(EXCLUDED.premium, inventarios_historico.premium),
+                                      diesel = COALESCE(EXCLUDED.diesel, inventarios_historico.diesel);
                     """
                     count = 0
                     for _, row in df_inv.iterrows():
@@ -133,7 +134,7 @@ def render(conn):
                             count += 1
                     conn.commit()
                     cursor.close()
-                    st.success(f"¡Se procesaron e importaron {count} registros de inventarios exitosamente!")
+                    st.success(f"¡Se procesaron e importaron {count} registros de inventarios exitosamente (respetando datos previos en vacíos/ceros)!")
             except Exception as e:
                 st.error(f"Error al procesar el archivo: {e}")
 
@@ -176,9 +177,9 @@ def render(conn):
                         INSERT INTO ventas_historico (estacion_id, fecha, regular, premium, diesel)
                         VALUES (%s, %s, %s, %s, %s)
                         ON CONFLICT (estacion_id, fecha) 
-                        DO UPDATE SET regular = EXCLUDED.regular,
-                                      premium = EXCLUDED.premium,
-                                      diesel = EXCLUDED.diesel;
+                        DO UPDATE SET regular = COALESCE(EXCLUDED.regular, ventas_historico.regular),
+                                      premium = COALESCE(EXCLUDED.premium, ventas_historico.premium),
+                                      diesel = COALESCE(EXCLUDED.diesel, ventas_historico.diesel);
                     """
                     count = 0
                     for _, row in df_ventas.iterrows():
