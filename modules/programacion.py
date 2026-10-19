@@ -67,6 +67,30 @@ def estilo_calendario(tabla):
     return tabla.style.apply(pintar, axis=None)
 
 
+@st.dialog("⚠️ Confirmar Eliminación")
+def confirmar_eliminacion(conn, orden_id, detalles_str):
+    st.write(f"¿Estás seguro de que deseas eliminar permanentemente la **Orden de Carga #{orden_id}**?")
+    st.caption(detalles_str)
+    c_si, c_no = st.columns(2)
+    with c_si:
+        if st.button("Confirmar y Eliminar", type="primary", use_container_width=True):
+            cursor = conn.cursor()
+            try:
+                q_del = f"DELETE FROM programacion_cargas WHERE id = {orden_id};"
+                cursor.execute(q_del)
+                conn.commit()
+                cursor.close()
+                st.session_state["mensaje_exito_orden"] = f"🗑️ Orden de Carga #{orden_id} eliminada del sistema."
+                st.rerun()
+            except Exception as e_del:
+                conn.rollback()
+                cursor.close()
+                st.error(f"Error al eliminar: {e_del}")
+    with c_no:
+        if st.button("Cancelar", use_container_width=True):
+            st.rerun()
+
+
 def render(conn):
     st.markdown("### 🚛 Matriz de Programación y Gestión de Órdenes")
     st.write("Administra de forma independiente cada Orden de Carga (Folio) y visualiza el resumen consolidado a 14 días.")
@@ -296,12 +320,12 @@ def render(conn):
                 with c2:
                     sel_fecha_alta = st.date_input("Fecha de Programación:", value=date.today(), min_value=date.today())
                 with c3:
-                    sel_vol_alta = st.number_input("Volumen (Litros):", min_value=0.0, value=0.0, step=100.0)
+                    sel_vol_alta = st.number_input("Volumen (Litros):", min_value=1, value=None, step=1, placeholder="Ingresa el volumen...")
 
                 submitted_alta = st.form_submit_button("🚀 Generar Orden de Carga")
                 if submitted_alta:
-                    if sel_vol_alta <= 0:
-                        st.warning("⚠️ Por favor ingresa un volumen mayor a 0 litros.")
+                    if sel_vol_alta is None or sel_vol_alta <= 0:
+                        st.warning("⚠️ Por favor ingresa un volumen válido mayor a 0 litros.")
                     else:
                         cursor = conn.cursor()
                         try:
@@ -402,19 +426,21 @@ def render(conn):
                         st.dataframe(df_ordenes, width='stretch', hide_index=True)
 
                     st.markdown("##### ⚙️ Modificar o Eliminar una Orden de Carga")
-                    col_id_sel, col_acc = st.columns(2)
+                    
+                    ids_disponibles = [int(i) for i in df_ordenes['orden_carga'].tolist()]
+                    if st.session_state.get("folio_sel_orden") not in ids_disponibles:
+                        st.session_state["folio_sel_orden"] = ids_disponibles[0]
+                    etiquetas_ordenes = {
+                        int(r.orden_carga): (
+                            f"#{int(r.orden_carga)} · {r.producto} · "
+                            f"{_etiqueta_fecha(pd.to_datetime(r.fecha_programacion).date())} · "
+                            f"{float(r.volumen_programado or 0):,.0f} L"
+                        )
+                        for r in df_ordenes.itertuples()
+                    }
+
+                    col_id_sel, col_btn_del = st.columns([3, 1], vertical_alignment="bottom")
                     with col_id_sel:
-                        ids_disponibles = [int(i) for i in df_ordenes['orden_carga'].tolist()]
-                        if st.session_state.get("folio_sel_orden") not in ids_disponibles:
-                            st.session_state["folio_sel_orden"] = ids_disponibles[0]
-                        etiquetas_ordenes = {
-                            int(r.orden_carga): (
-                                f"#{int(r.orden_carga)} · {r.producto} · "
-                                f"{_etiqueta_fecha(pd.to_datetime(r.fecha_programacion).date())} · "
-                                f"{float(r.volumen_programado or 0):,.0f} L"
-                            )
-                            for r in df_ordenes.itertuples()
-                        }
                         sel_orden_id = st.selectbox(
                             "Selecciona el Folio (Orden de Carga) a administrar:",
                             ids_disponibles,
@@ -423,12 +449,18 @@ def render(conn):
                         )
                     
                     row_orden_act = df_ordenes[df_ordenes['orden_carga'] == sel_orden_id].iloc[0]
+                    
+                    with col_btn_del:
+                        if st.button("🗑️ Eliminar Orden", type="primary", use_container_width=True, key=f"btn_del_{sel_orden_id}"):
+                            detalles_orden = etiquetas_ordenes.get(sel_orden_id, f"Folio #{sel_orden_id}")
+                            confirmar_eliminacion(conn, sel_orden_id, detalles_orden)
+
                     sufijo_form = f"{sel_orden_id}_{row_orden_act['volumen_programado']}_{row_orden_act['fecha_programacion']}_{row_orden_act['producto']}"
 
                     with st.form("form_editar_orden"):
                         ce1, ce2, ce3 = st.columns(3)
                         with ce1:
-                            nuevo_vol = st.number_input("Modificar Volumen (L):", value=float(row_orden_act['volumen_programado']), step=100.0, key=f"ed_vol_{sufijo_form}")
+                            nuevo_vol = st.number_input("Modificar Volumen (L):", value=int(float(row_orden_act['volumen_programado'])), step=1, key=f"ed_vol_{sufijo_form}")
                         with ce2:
                             fecha_actual_obj = pd.to_datetime(row_orden_act['fecha_programacion']).date()
                             nueva_fecha = st.date_input("Modificar Fecha:", value=fecha_actual_obj, min_value=date.today(), key=f"ed_fecha_{sufijo_form}")
@@ -436,11 +468,7 @@ def render(conn):
                             prod_actual = row_orden_act['producto']
                             nuevo_prod = st.selectbox("Modificar Producto:", ["REGULAR", "PREMIUM", "DIESEL"], index=0 if "REGULAR" in prod_actual.upper() else (1 if "PREMIUM" in prod_actual.upper() else 2), key=f"ed_prod_{sufijo_form}")
 
-                        b_upd, b_del = st.columns(2)
-                        with b_upd:
-                            submitted_update = st.form_submit_button("💾 Guardar Cambios en la Orden")
-                        with b_del:
-                            submitted_delete = st.form_submit_button("🗑️ Eliminar Orden de Carga", type="primary")
+                        submitted_update = st.form_submit_button("💾 Guardar Cambios en la Orden", use_container_width=True)
 
                         if submitted_update:
                             cursor = conn.cursor()
@@ -460,20 +488,6 @@ def render(conn):
                                 conn.rollback()
                                 cursor.close()
                                 st.error(f"Error al actualizar: {e_upd}")
-
-                        if submitted_delete:
-                            cursor = conn.cursor()
-                            try:
-                                q_del = f"DELETE FROM programacion_cargas WHERE id = {sel_orden_id};"
-                                cursor.execute(q_del)
-                                conn.commit()
-                                cursor.close()
-                                st.session_state["mensaje_exito_orden"] = f"🗑️ Orden de Carga #{sel_orden_id} eliminada del sistema."
-                                st.rerun()
-                            except Exception as e_del:
-                                conn.rollback()
-                                cursor.close()
-                                st.error(f"Error al eliminar: {e_del}")
 
             except Exception as e_ord:
                 st.warning(f"Error al consultar las órdenes de carga: {e_ord}")
