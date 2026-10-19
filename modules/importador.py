@@ -40,7 +40,7 @@ def render(conn):
     st.markdown("### 📥 Módulo de Importación Masiva (Excel / CSV)")
     st.write("Sube tus archivos de Excel (`.xlsx`) o CSV. El sistema corregirá automáticamente formatos de fecha, valores numéricos y convertirá los ceros en nulos (`NULL`).")
     
-    tab_inv, tab_ventas, tab_prog = st.tabs(["📦 Inventarios Históricos", "📊 Ventas Históricas", "🚛 Órdenes de Carga"])
+    tab_inv, tab_ventas = st.tabs(["📦 Inventarios Históricos", "📊 Ventas Históricas"])
     
     # ==========================================
     # 1. INVENTARIOS HISTÓRICOS
@@ -176,82 +176,4 @@ def render(conn):
                         INSERT INTO ventas_historico (estacion_id, fecha, regular, premium, diesel)
                         VALUES (%s, %s, %s, %s, %s)
                         ON CONFLICT (estacion_id, fecha) 
-                        DO UPDATE SET regular = EXCLUDED.regular,
-                                      premium = EXCLUDED.premium,
-                                      diesel = EXCLUDED.diesel;
-                    """
-                    count = 0
-                    for _, row in df_ventas.iterrows():
-                        if pd.notna(row['fecha']) and str(row['estacion_id']).strip() != "":
-                            reg_val = float(row['regular']) if 'regular' in df_ventas.columns and pd.notna(row['regular']) else None
-                            pre_val = float(row['premium']) if 'premium' in df_ventas.columns and pd.notna(row['premium']) else None
-                            die_val = float(row['diesel']) if 'diesel' in df_ventas.columns and pd.notna(row['diesel']) else None
-
-                            cursor.execute(sql_upsert_ventas, (
-                                str(row['estacion_id']).strip(),
-                                str(row['fecha']),
-                                reg_val,
-                                pre_val,
-                                die_val
-                            ))
-                            count += 1
-                    conn.commit()
-                    cursor.close()
-                    st.success(f"¡Se procesaron e importaron {count} registros de ventas exitosamente!")
-            except Exception as e:
-                st.error(f"Error al procesar el archivo de ventas: {e}")
-
-    # ==========================================
-    # 3. ÓRDENES DE CARGA (PROGRAMACIÓN)
-    # ==========================================
-    with tab_prog:
-        st.subheader("Carga de Órdenes de Carga")
-        st.write("Cada fila importada se agregará como una nueva orden de carga independiente con su propio folio automático, sin afectar los registros existentes.")
-        
-        df_plantilla_prog = pd.DataFrame(columns=["id_estacion", "producto", "fecha_programacion", "volumen_programado"])
-        st.download_button(
-            label="📥 Descargar Plantilla Excel (Órdenes de Carga)",
-            data=dataframe_a_excel_bytes(df_plantilla_prog),
-            file_name="plantilla_ordenes_carga.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="descargar_plantilla_prog_xlsx"
-        )
-        st.markdown("---")
-
-        file_prog = st.file_uploader("Selecciona el archivo (Excel o CSV) de Programación:", type=["xlsx", "xls", "csv"], key="up_prog_file")
-        
-        if file_prog is not None:
-            try:
-                if file_prog.name.endswith('.csv'):
-                    df_prog = pd.read_csv(file_prog)
-                else:
-                    df_prog = pd.read_excel(file_prog)
-
-                df_prog['fecha_programacion'] = df_prog['fecha_programacion'].apply(limpiar_fecha)
-                df_prog['volumen_programado'] = df_prog['volumen_programado'].apply(limpiar_numero)
-
-                st.info(f"📊 Archivo cargado y sanitizado. Total de registros: {len(df_prog)}")
-                st.dataframe(df_prog, width='stretch', height=250)
-
-                if st.button("🚀 Registrar Órdenes de Carga", key="btn_imp_prog"):
-                    cursor = conn.cursor()
-                    sql_insert_prog = """
-                        INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado)
-                        VALUES (%s, %s, %s, %s);
-                    """
-                    count = 0
-                    for _, row in df_prog.iterrows():
-                        if pd.notna(row['fecha_programacion']) and pd.notna(row['volumen_programado']) and str(row['id_estacion']).strip() != "":
-                            vol_val = float(row['volumen_programado'])
-                            cursor.execute(sql_insert_prog, (
-                                str(row['id_estacion']).strip(),
-                                str(row['producto']).strip(),
-                                str(row['fecha_programacion']),
-                                vol_val
-                            ))
-                            count += 1
-                    conn.commit()
-                    cursor.close()
-                    st.success(f"¡Se registraron {count} órdenes de carga exitosamente!")
-            except Exception as e:
-                st.error(f"Error al procesar el archivo de programación: {e}")
+                        DO UPDATE SET regular = EXCLUDED
