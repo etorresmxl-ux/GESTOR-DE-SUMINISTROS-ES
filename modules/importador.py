@@ -176,4 +176,27 @@ def render(conn):
                         INSERT INTO ventas_historico (estacion_id, fecha, regular, premium, diesel)
                         VALUES (%s, %s, %s, %s, %s)
                         ON CONFLICT (estacion_id, fecha) 
-                        DO UPDATE SET regular = EXCLUDED
+                        DO UPDATE SET regular = EXCLUDED.regular,
+                                      premium = EXCLUDED.premium,
+                                      diesel = EXCLUDED.diesel;
+                    """
+                    count = 0
+                    for _, row in df_ventas.iterrows():
+                        if pd.notna(row['fecha']) and str(row['estacion_id']).strip() != "":
+                            reg_val = float(row['regular']) if 'regular' in df_ventas.columns and pd.notna(row['regular']) else None
+                            pre_val = float(row['premium']) if 'premium' in df_ventas.columns and pd.notna(row['premium']) else None
+                            die_val = float(row['diesel']) if 'diesel' in df_ventas.columns and pd.notna(row['diesel']) else None
+
+                            cursor.execute(sql_upsert_ventas, (
+                                str(row['estacion_id']).strip(),
+                                str(row['fecha']),
+                                reg_val,
+                                pre_val,
+                                die_val
+                            ))
+                            count += 1
+                    conn.commit()
+                    cursor.close()
+                    st.success(f"¡Se procesaron e importaron {count} registros de ventas exitosamente!")
+            except Exception as e:
+                st.error(f"Error al procesar el archivo de ventas: {e}")
