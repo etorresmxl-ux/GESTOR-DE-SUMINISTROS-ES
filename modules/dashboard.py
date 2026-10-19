@@ -3,6 +3,25 @@ import pandas as pd
 import numpy as np
 from datetime import date, datetime
 
+def normalizar_producto(producto_raw):
+    """
+    Normaliza cualquier variante de producto a una llave estándar:
+    'regular', 'premium', 'diesel' o el texto original limpio si no coincide.
+    """
+    if pd.isna(producto_raw):
+        return ""
+    
+    p_str = str(producto_raw).strip().lower()
+    
+    if 'regular' in p_str or 'magna' in p_str:
+        return 'regular'
+    elif 'premium' in p_str:
+        return 'premium'
+    elif 'diesel' in p_str:
+        return 'diesel'
+    else:
+        return p_str
+
 def render(conn):
     st.markdown("### 📊 Dashboard Operativo - Inventarios, Espacio Disponible y Días de Suministro (D/S)")
     st.write("Resumen general por estación: Inventario teórico/actualizado al día de hoy (con indicador * si es arrastrado), capacidad máxima, cargas del día y Días de Suministro (VDP 12 semanas).")
@@ -68,14 +87,8 @@ def render(conn):
         hoy_str = hoy.strftime("%Y-%m-%d")
 
         # 1. Consultar descargas reales en bitacora_descargas para ajustar el inventario histórico al día de hoy
-        # Diccionario para sumar descargas reales por estación y producto desde la fecha del inventario hasta hoy
-        descargas_reales = {} # {(estacion_id, producto): volumen_total_descargado}
+        descargas_reales = {} # {(estacion_id, producto_key, fecha_str): volumen_total_descargado}
         try:
-            query_bitacora_hist = """
-                id_estacion, producto, fecha_descarga_real, cantidad_natural 
-                FROM bitacora_descargas;
-            """
-            # Corrección de formato de consulta segura
             query_bitacora_hist = """
                 SELECT id_estacion, producto, fecha_descarga_real, cantidad_natural 
                 FROM bitacora_descargas;
@@ -84,15 +97,7 @@ def render(conn):
             if not df_bit_hist.empty:
                 for _, rb in df_bit_hist.iterrows():
                     e_id = str(rb['id_estacion']).strip()
-                    p_raw = str(rb['producto']).strip().lower()
-                    if 'regular' in p_raw or 'magna' in p_raw:
-                        pk = 'regular'
-                    elif 'premium' in p_raw:
-                        pk = 'premium'
-                    elif 'diesel' in p_raw:
-                        pk = 'diesel'
-                    else:
-                        pk = p_raw
+                    pk = normalizar_producto(rb['producto'])
                     
                     f_desc = pd.to_datetime(rb['fecha_descarga_real']).strftime("%Y-%m-%d")
                     vol_real = float(rb['cantidad_natural']) if pd.notna(rb['cantidad_natural']) else 0.0
@@ -161,8 +166,8 @@ def render(conn):
             prefijo = "*" if es_teorico else ""
             return f"{prefijo}{litros:,.0f} L", es_teorico
 
-        # Consultar únicamente las cargas programadas para el DÍA DE HOY
-        cargas_hoy = {} # {(estacion_id, producto): volumen_programado_hoy}
+        # Consultar únicamente las cargas programadas para el DÍA DE HOY (acumulando múltiples folios)
+        cargas_hoy = {} # {(estacion_id, producto_key): volumen_total_programado_hoy}
         try:
             query_cargas = f"""
                 SELECT id_estacion, producto, volumen_programado
@@ -173,17 +178,11 @@ def render(conn):
             if not df_cargas.empty:
                 for _, rc in df_cargas.iterrows():
                     est_id = str(rc['id_estacion']).strip()
-                    p_key = str(rc['producto']).strip().lower()
-                    if 'regular' in p_key or 'magna' in p_key:
-                        pk = 'regular'
-                    elif 'premium' in p_key:
-                        pk = 'premium'
-                    elif 'diesel' in p_key:
-                        pk = 'diesel'
-                    else:
-                        pk = p_key
+                    pk = normalizar_producto(rc['producto'])
                     vol = float(rc['volumen_programado']) if pd.notna(rc['volumen_programado']) else 0.0
-                    cargas_hoy[(est_id, pk)] = vol
+                    
+                    key_carga = (est_id, pk)
+                    cargas_hoy[key_carga] = cargas_hoy.get(key_carga, 0.0) + vol
         except Exception as e:
             pass
 
