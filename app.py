@@ -12,29 +12,29 @@ st.set_page_config(
 st.title("⛽ Sistema de Gestión de Suministro e Inventarios")
 st.markdown("---")
 
-# Menú lateral fijo mediante radio buttons para visualización directa
+# Menú lateral fijo mediante radio buttons con el nuevo orden solicitado
 st.sidebar.title("Navegación")
 menu = st.sidebar.radio(
     "Selecciona un Módulo",
     [
         "📊 Dashboard Operativo",
         "📅 Matriz de Programación (MRP)",
+        "📝 Registro de Inventarios",
+        "📊 Registro de Ventas",
         "🚛 Administrador de Cargas",
-        "📥 Importar Masivos (CSV)",
-        "📝 Registro de Inventarios", 
-        "📊 Registro de Ventas"
+        "📥 Importar Masivos (CSV)"
     ]
 )
 
 # ==========================================
-# INDICADOR PERMANENTE DE FECHA Y HORA DEL SISTEMA
+# INDICADOR PERMANENTE DE FECHA Y HORA (ALINEADO A LA IZQUIERDA)
 # ==========================================
 tz_local = timezone(timedelta(hours=-7))
 ahora_local = datetime.now(tz_local)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown(
-    f"<div style='text-align: center; color: #aaa; font-size: 0.85em; padding: 5px;'>"
+    f"<div style='text-align: left; color: #aaa; font-size: 0.85em; padding: 5px;'>"
     f"🕒 <b>Reloj del Sistema</b><br>"
     f"📅 {ahora_local.strftime('%Y-%m-%d')}<br>"
     f"⏱️ {ahora_local.strftime('%H:%M:%S')} (UTC-7)"
@@ -49,14 +49,14 @@ if conn:
         dashboard.render(conn)
     elif menu == "📅 Matriz de Programación (MRP)":
         programacion.render(conn)
-    elif menu == "🚛 Administrador de Cargas":
-        administrador_cargas.render(conn)
-    elif menu == "📥 Importar Masivos (CSV)":
-        importador.render(conn)
     elif menu == "📝 Registro de Inventarios":
         inventario.render(conn)
     elif menu == "📊 Registro de Ventas":
         ventas.render(conn)
+    elif menu == "🚛 Administrador de Cargas":
+        administrador_cargas.render(conn)
+    elif menu == "📥 Importar Masivos (CSV)":
+        importador.render(conn)
     
     conn.close()
 else:
