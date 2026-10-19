@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from datetime import date
 import io
 import re
 
@@ -15,8 +16,7 @@ def limpiar_fecha(val):
         return None
 
 def limpiar_numero_preservando_ceros(val):
-    """Limpia el número, elimina caracteres extra. 
-    Permite que el 0 sea un valor válido, pero descarta celdas vacías o nulas."""
+    """Limpia el número permitiendo ceros (útil para cancelaciones en programación) y descartando vacíos."""
     if pd.isna(val):
         return None
     val_str = str(val).strip()
@@ -27,7 +27,7 @@ def limpiar_numero_preservando_ceros(val):
         num = float(val_limpio)
         if pd.isna(num):
             return None
-        return num # ¡Aquí permitimos que el 0.0 pase como un número válido a actualizar!
+        return num # El 0.0 pasa perfectamente
     except ValueError:
         return None
 
@@ -39,16 +39,15 @@ def dataframe_a_excel_bytes(df):
 
 def render(conn):
     st.markdown("### 📥 Módulo de Importación Masiva (Excel / CSV)")
-    st.write("Sube tus archivos de Excel (`.xlsx`) o CSV. Los **ceros (0)** sí se actualizarán, mientras que las **celdas vacías** se ignorarán conservando el valor previo de la base de datos.")
+    st.write("Sube tus archivos de Excel (`.xlsx`) o CSV. Para las **Órdenes de Carga**, el sistema sincronizará y actualizará el programa futuro (desde hoy en adelante) con la nueva información, respetando el pasado histórico.")
     
-    tab_inv, tab_ventas, tab_prog = st.tabs(["📦 Inventarios Históricos", "📊 Ventas Históricas", "🚛 Órdenes de Carga"])
+    tab_inv, tab_ventas, tab_prog = st.tabs(["📦 Inventarios Históricos", "📊 Ventas Históricas", "🚛 Órdenes de Carga (Programa)"])
     
     # ==========================================
     # 1. INVENTARIOS HISTÓRICOS
     # ==========================================
     with tab_inv:
         st.subheader("Carga de Inventarios Históricos")
-        
         df_plantilla_inv = pd.DataFrame(columns=["estacion_id", "fecha", "regular", "premium", "diesel"])
         st.download_button(
             label="📥 Descargar Plantilla Excel (Inventarios)",
@@ -58,58 +57,21 @@ def render(conn):
             key="descargar_plantilla_inv_xlsx"
         )
         st.markdown("---")
-
-        file_inv = st.file_uploader("Selecciona el archivo (Excel o CSV) de Inventarios:", type=["xlsx", "xls", "csv"], key="up_inv_file")
+        file_inv = st.file_uploader("Selecciona el archivo de Inventarios:", type=["xlsx", "xls", "csv"], key="up_inv_file")
         
         if file_inv is not None:
             try:
-                if file_inv.name.endswith('.csv'):
-                    df_inv = pd.read_csv(file_inv)
-                else:
-                    df_inv = pd.read_excel(file_inv)
-                
+                df_inv = pd.read_csv(file_inv) if file_inv.name.endswith('.csv') else pd.read_excel(file_inv)
                 df_inv['fecha'] = df_inv['fecha'].apply(limpiar_fecha)
                 for col in ['regular', 'premium', 'diesel']:
                     if col in df_inv.columns:
                         df_inv[col] = df_inv[col].apply(limpiar_numero_preservando_ceros)
 
-                cursor = conn.cursor()
-                cursor.execute("SELECT id_estacion, producto, capacidad_maxima FROM estaciones_detalle;")
-                cap_dict = {}
-                for row in cursor.fetchall():
-                    cap_dict[(str(row[0]), str(row[1]).strip().lower())] = float(row[2]) if row[2] is not None else 0.0
-                cursor.close()
-
-                advertencias = []
-                for idx, row in df_inv.iterrows():
-                    est_id = str(row['estacion_id'])
-                    for prod_key in ['regular', 'premium', 'diesel']:
-                        if prod_key in df_inv.columns and pd.notna(row[prod_key]):
-                            val = row[prod_key]
-                            cap_max = 0.0
-                            for (c_est, c_prod), c_val in cap_dict.items():
-                                if c_est == est_id and prod_key in c_prod:
-                                    cap_max = c_val
-                                    break
-                            if cap_max > 0 and val > cap_max:
-                                df_inv.at[idx, prod_key] = None
-                                advertencias.append(
-                                    f"⚠️ **Fila {idx + 2} (Estación {est_id})**: El valor de **{prod_key}** ({val:,.0f} L) "
-                                    f"supera la capacidad máxima ({cap_max:,.0f} L). Se omitió automáticamente."
-                                )
-
-                st.info(f"📊 Archivo cargado y sanitizado correctamente. Total de registros: {len(df_inv)}")
-                if advertencias:
-                    st.warning("Valores omitidos por exceder capacidad:")
-                    for adv in advertencias:
-                        st.markdown(f"- {adv}")
-
-                st.write("Vista previa de los datos limpios a importar:")
+                st.info(f"📊 Archivo cargado. Total de registros: {len(df_inv)}")
                 st.dataframe(df_inv, width='stretch', height=250)
 
                 if st.button("🚀 Procesar e Importar Inventarios", key="btn_imp_inv"):
                     cursor = conn.cursor()
-                    # COALESCE mantiene el valor anterior solo si el valor entrante es NULL (vacío). El 0 sí pasa.
                     sql_upsert_inv = """
                         INSERT INTO inventarios_historico (estacion_id, fecha, regular, premium, diesel)
                         VALUES (%s, %s, %s, %s, %s)
@@ -121,16 +83,12 @@ def render(conn):
                     count = 0
                     for _, row in df_inv.iterrows():
                         if pd.notna(row['fecha']) and str(row['estacion_id']).strip() != "":
-                            reg_val = float(row['regular']) if 'regular' in df_inv.columns and pd.notna(row['regular']) else None
-                            pre_val = float(row['premium']) if 'premium' in df_inv.columns and pd.notna(row['premium']) else None
-                            die_val = float(row['diesel']) if 'diesel' in df_inv.columns and pd.notna(row['diesel']) else None
-
                             cursor.execute(sql_upsert_inv, (
                                 str(row['estacion_id']).strip(),
                                 str(row['fecha']),
-                                reg_val,
-                                pre_val,
-                                die_val
+                                float(row['regular']) if 'regular' in df_inv.columns and pd.notna(row['regular']) else None,
+                                float(row['premium']) if 'premium' in df_inv.columns and pd.notna(row['premium']) else None,
+                                float(row['diesel']) if 'diesel' in df_inv.columns and pd.notna(row['diesel']) else None
                             ))
                             count += 1
                     conn.commit()
@@ -144,7 +102,6 @@ def render(conn):
     # ==========================================
     with tab_ventas:
         st.subheader("Carga de Ventas Históricas")
-        
         df_plantilla_ventas = pd.DataFrame(columns=["estacion_id", "fecha", "regular", "premium", "diesel"])
         st.download_button(
             label="📥 Descargar Plantilla Excel (Ventas)",
@@ -154,22 +111,17 @@ def render(conn):
             key="descargar_plantilla_ventas_xlsx"
         )
         st.markdown("---")
-
-        file_ventas = st.file_uploader("Selecciona el archivo (Excel o CSV) de Ventas:", type=["xlsx", "xls", "csv"], key="up_ventas_file")
+        file_ventas = st.file_uploader("Selecciona el archivo de Ventas:", type=["xlsx", "xls", "csv"], key="up_ventas_file")
         
         if file_ventas is not None:
             try:
-                if file_ventas.name.endswith('.csv'):
-                    df_ventas = pd.read_csv(file_ventas)
-                else:
-                    df_ventas = pd.read_excel(file_ventas)
-
+                df_ventas = pd.read_csv(file_ventas) if file_ventas.name.endswith('.csv') else pd.read_excel(file_ventas)
                 df_ventas['fecha'] = df_ventas['fecha'].apply(limpiar_fecha)
                 for col in ['regular', 'premium', 'diesel']:
                     if col in df_ventas.columns:
                         df_ventas[col] = df_ventas[col].apply(limpiar_numero_preservando_ceros)
 
-                st.info(f"📊 Archivo cargado y sanitizado. Total de registros: {len(df_ventas)}")
+                st.info(f"📊 Archivo cargado. Total de registros: {len(df_ventas)}")
                 st.dataframe(df_ventas, width='stretch', height=250)
 
                 if st.button("🚀 Procesar e Importar Ventas", key="btn_imp_ventas"):
@@ -185,16 +137,12 @@ def render(conn):
                     count = 0
                     for _, row in df_ventas.iterrows():
                         if pd.notna(row['fecha']) and str(row['estacion_id']).strip() != "":
-                            reg_val = float(row['regular']) if 'regular' in df_ventas.columns and pd.notna(row['regular']) else None
-                            pre_val = float(row['premium']) if 'premium' in df_ventas.columns and pd.notna(row['premium']) else None
-                            die_val = float(row['diesel']) if 'diesel' in df_ventas.columns and pd.notna(row['diesel']) else None
-
                             cursor.execute(sql_upsert_ventas, (
                                 str(row['estacion_id']).strip(),
                                 str(row['fecha']),
-                                reg_val,
-                                pre_val,
-                                die_val
+                                float(row['regular']) if 'regular' in df_ventas.columns and pd.notna(row['regular']) else None,
+                                float(row['premium']) if 'premium' in df_ventas.columns and pd.notna(row['premium']) else None,
+                                float(row['diesel']) if 'diesel' in df_ventas.columns and pd.notna(row['diesel']) else None
                             ))
                             count += 1
                     conn.commit()
@@ -204,11 +152,11 @@ def render(conn):
                 st.error(f"Error al procesar el archivo de ventas: {e}")
 
     # ==========================================
-    # 3. ÓRDENES DE CARGA (PROGRAMACIÓN)
+    # 3. ÓRDENES DE CARGA (PROGRAMACIÓN / SINCRONIZACIÓN FUTURA)
     # ==========================================
     with tab_prog:
-        st.subheader("Carga Masiva de Órdenes de Carga")
-        st.write("Cada fila importada se registrará como una **Orden de Carga** independiente con su propio folio automático.")
+        st.subheader("Carga Masiva de Órdenes de Carga (Actualización de Programa)")
+        st.write("Sube la actualización semanal del programa. **El sistema sincronizará y actualizará el horizonte futuro** (a partir de hoy) con estos nuevos valores, permitiendo reflejar cambios o cancelaciones (ceros), sin modificar el pasado histórico.")
         
         df_plantilla_prog = pd.DataFrame(columns=["id_estacion", "producto", "fecha_programacion", "volumen_programado"])
         st.download_button(
@@ -220,40 +168,50 @@ def render(conn):
         )
         st.markdown("---")
 
-        file_prog = st.file_uploader("Selecciona el archivo (Excel o CSV) de Programación:", type=["xlsx", "xls", "csv"], key="up_prog_file")
+        file_prog = st.file_uploader("Selecciona el archivo de Órdenes de Carga:", type=["xlsx", "xls", "csv"], key="up_prog_file")
         
         if file_prog is not None:
             try:
-                if file_prog.name.endswith('.csv'):
-                    df_prog = pd.read_csv(file_prog)
-                else:
-                    df_prog = pd.read_excel(file_prog)
-
+                df_prog = pd.read_csv(file_prog) if file_prog.name.endswith('.csv') else pd.read_excel(file_prog)
                 df_prog['fecha_programacion'] = df_prog['fecha_programacion'].apply(limpiar_fecha)
                 df_prog['volumen_programado'] = df_prog['volumen_programado'].apply(limpiar_numero_preservando_ceros)
 
-                st.info(f"📊 Archivo cargado y sanitizado. Total de registros: {len(df_prog)}")
+                st.info(f"📊 Archivo cargado y sanitizado. Total de registros en archivo: {len(df_prog)}")
                 st.dataframe(df_prog, width='stretch', height=250)
 
-                if st.button("🚀 Procesar e Importar Órdenes de Carga", key="btn_imp_prog"):
+                if st.button("🚀 Sincronizar y Actualizar Programa Futuro", key="btn_imp_prog"):
+                    hoy_str = date.today().strftime("%Y-%m-%d")
                     cursor = conn.cursor()
-                    sql_insert_prog = """
-                        INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado)
-                        VALUES (%s, %s, %s, %s);
-                    """
-                    count = 0
+                    
+                    # 1. Limpiamos / borramos el programa futuro (>= hoy) que viene en este archivo 
+                    # para evitar duplicados y asegurar que la nueva foto del proveedor mande.
+                    # Opcionalmente podemos hacer un DELETE por cada estación/producto/fecha futura presente en el Excel:
+                    count_inserciones = 0
+                    
                     for _, row in df_prog.iterrows():
-                        if pd.notna(row['fecha_programacion']) and pd.notna(row['volumen_programado']) and str(row['id_estacion']).strip() != "":
-                            vol_val = float(row['volumen_programado'])
-                            cursor.execute(sql_insert_prog, (
-                                str(row['id_estacion']).strip(),
-                                str(row['producto']).strip(),
-                                str(row['fecha_programacion']),
-                                vol_val
-                            ))
-                            count += 1
+                        fecha_p = row['fecha_programacion']
+                        estacion = str(row['id_estacion']).strip()
+                        producto = str(row['producto']).strip()
+                        volumen = row['volumen_programado']
+
+                        if pd.notna(fecha_p) and pd.notna(volumen) and estacion != "":
+                            # Solo aplicamos la sobre-escritura inteligente si la fecha es de hoy en adelante (futuro)
+                            if fecha_p >= hoy_str:
+                                # Eliminamos cualquier orden previa duplicada para esa misma estación, producto y fecha futura
+                                cursor.execute("""
+                                    DELETE FROM programacion_cargas 
+                                    WHERE id_estacion = %s AND producto = %s AND fecha_programacion = %s;
+                                """, (estacion, producto, fecha_p))
+                            
+                            # Insertamos la nueva orden actualizada (incluso si el volumen es 0.0 para reflejar cancelación)
+                            cursor.execute("""
+                                INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado, "user", creado_en)
+                                VALUES (%s, %s, %s, %s, 'Importación Masiva', NOW());
+                            """, (estacion, producto, fecha_p, volumen))
+                            count_inserciones += 1
+
                     conn.commit()
                     cursor.close()
-                    st.success(f"¡Se procesaron e importaron {count} órdenes de carga exitosamente!")
+                    st.success(f"¡Sincronización completada! Se procesaron {count_inserciones} órdenes actualizando el horizonte futuro correctamente.")
             except Exception as e:
-                st.error(f"Error al procesar el archivo de programación: {e}")
+                st.error(f"Error al procesar la programación: {e}")
