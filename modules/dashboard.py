@@ -108,7 +108,7 @@ def render(conn):
                     key = (e_id, pk, f_desc)
                     descargas_reales[key] = descargas_reales.get(key, 0.0) + vol_real
         except Exception as e:
-            pass
+            st.warning(f"Aviso al consultar bitácora de descargas: {e}")
 
         # 2. Ajustar el inventario de cada estación descontando ventas y sumando descargas reales transcurridas
         inventarios_actualizados_reg = []
@@ -169,13 +169,14 @@ def render(conn):
             prefijo = "*" if es_teorico else ""
             return f"{prefijo}{litros:,.0f} L", es_teorico
 
-        # Consultar únicamente las cargas programadas para el DÍA DE HOY (acumulando múltiples folios)
+        # Consultar únicamente las cargas programadas para el DÍA DE HOY (acumulando múltiples folios de forma segura)
         cargas_hoy = {} # {(estacion_id, producto_key): volumen_total_programado_hoy}
         try:
+            # Usamos coincidencia de texto parcial en la fecha para evitar problemas de tipo en PostgreSQL
             query_cargas = f"""
                 SELECT id_estacion, producto, volumen_programado
                 FROM programacion_cargas
-                WHERE fecha_programacion::date = '{hoy_str}'::date;
+                WHERE CAST(fecha_programacion AS TEXT) LIKE '{hoy_str}%';
             """
             df_cargas = pd.read_sql(query_cargas, conn)
             if not df_cargas.empty:
@@ -187,7 +188,7 @@ def render(conn):
                     key_carga = (est_id, pk)
                     cargas_hoy[key_carga] = cargas_hoy.get(key_carga, 0.0) + vol
         except Exception as e:
-            pass
+            st.warning(f"Aviso al consultar cargas programadas de hoy: {e}")
 
         # Calcular días de suministro actuales utilizando el inventario proyectado a hoy
         df['ds_r'] = df.apply(lambda r: round(r['reg_litros_calc'] / r['vdp_reg'], 1) if r['cap_regular'] > 0 and r['vdp_reg'] > 0 else np.nan, axis=1)
