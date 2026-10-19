@@ -152,7 +152,7 @@ def render(conn):
                 st.error(f"Error al procesar el archivo de ventas: {e}")
 
     # ==========================================
-    # 3. ÓRDENES DE CARGA (PROGRAMACIÓN / SINCRONIZACIÓN FUTURA)
+    # 3. ÓRDENES DE CARGA (PROGRAMACIÓN / SINCRONIZACIÓN FUTURA BLINDADA)
     # ==========================================
     with tab_prog:
         st.subheader("Carga Masiva de Órdenes de Carga (Actualización de Programa)")
@@ -183,9 +183,6 @@ def render(conn):
                     hoy_str = date.today().strftime("%Y-%m-%d")
                     cursor = conn.cursor()
                     
-                    # 1. Limpiamos / borramos el programa futuro (>= hoy) que viene en este archivo 
-                    # para evitar duplicados y asegurar que la nueva foto del proveedor mande.
-                    # Opcionalmente podemos hacer un DELETE por cada estación/producto/fecha futura presente en el Excel:
                     count_inserciones = 0
                     
                     for _, row in df_prog.iterrows():
@@ -195,15 +192,17 @@ def render(conn):
                         volumen = row['volumen_programado']
 
                         if pd.notna(fecha_p) and pd.notna(volumen) and estacion != "":
-                            # Solo aplicamos la sobre-escritura inteligente si la fecha es de hoy en adelante (futuro)
+                            # Solo aplicamos la sincronización si la fecha es de hoy en adelante (futuro)
                             if fecha_p >= hoy_str:
-                                # Eliminamos cualquier orden previa duplicada para esa misma estación, producto y fecha futura
+                                # Eliminación blindada normalizando espacios y mayúsculas
                                 cursor.execute("""
                                     DELETE FROM programacion_cargas 
-                                    WHERE id_estacion = %s AND producto = %s AND fecha_programacion = %s;
+                                    WHERE UPPER(TRIM(id_estacion)) = UPPER(TRIM(%s)) 
+                                      AND UPPER(TRIM(producto)) = UPPER(TRIM(%s)) 
+                                      AND fecha_programacion = %s;
                                 """, (estacion, producto, fecha_p))
                             
-                            # Insertamos la nueva orden actualizada (incluso si el volumen es 0.0 para reflejar cancelación)
+                            # Insertamos la nueva orden actualizada del Excel
                             cursor.execute("""
                                 INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado, "user", creado_en)
                                 VALUES (%s, %s, %s, %s, 'Importación Masiva', NOW());
@@ -212,6 +211,6 @@ def render(conn):
 
                     conn.commit()
                     cursor.close()
-                    st.success(f"¡Sincronización completada! Se procesaron {count_inserciones} órdenes actualizando el horizonte futuro correctamente.")
+                    st.success(f"¡Sincronización completada! Se procesaron {count_inserciones} órdenes actualizando el horizonte futuro de forma limpia.")
             except Exception as e:
                 st.error(f"Error al procesar la programación: {e}")
