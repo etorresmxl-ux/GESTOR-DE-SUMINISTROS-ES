@@ -23,22 +23,11 @@ def normalizar_producto(producto_raw):
         return p_str
 
 def render(conn):
-    # Definir fecha y hora local (UTC-7 / Noroeste / Mexicali)
+    # Definir fecha y hora local (UTC-7 / Noroeste / Mexicali) para los cálculos
     tz_local = timezone(timedelta(hours=-7))
     ahora_local = datetime.now(tz_local)
     hoy = ahora_local.date()
     hoy_str = hoy.strftime("%Y-%m-%d")
-
-    # Indicador de fecha y hora local en el menú lateral (inferior)
-    st.sidebar.markdown("---")
-    st.sidebar.markdown(
-        f"<div style='text-align: center; color: #aaa; font-size: 0.85em; padding: 10px;'>"
-        f"🕒 <b>Reloj del Sistema</b><br>"
-        f"📅 {ahora_local.strftime('%Y-%m-%d')}<br>"
-        f"⏱️ {ahora_local.strftime('%H:%M:%S')} (UTC-7)"
-        f"</div>",
-        unsafe_allow_html=True
-    )
 
     st.markdown("### 📊 Dashboard Operativo - Inventarios, Espacio Disponible y Días de Suministro (D/S)")
     st.write("Resumen general por estación: Inventario teórico/actualizado al día de hoy (con indicador * si es arrastrado), capacidad máxima, cargas del día y Días de Suministro (VDP 12 semanas).")
