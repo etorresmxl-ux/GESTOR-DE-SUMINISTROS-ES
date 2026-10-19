@@ -237,8 +237,9 @@ def render(conn):
                             "estacion": f"{r['id_estacion']} - {r['estacion']}",
                             "plaza": str(r['plaza']),
                             "producto": prod,
-                            "ds": ds,
                             "litros_val": str_inv_actual,
+                            "vta_hoy": f"{vdp:,.0f} L",
+                            "ds": ds,
                             "espacio": espacio,
                             "programa": programa_status
                         })
@@ -255,6 +256,7 @@ def render(conn):
                 "Plaza": df_alertas['plaza'],
                 "Producto": df_alertas['producto'],
                 "Inventario Actual": df_alertas['litros_val'],
+                "Venta Proyectada Hoy": df_alertas['vta_hoy'],
                 "D/S Actual": df_alertas['ds'].apply(lambda x: f"{x:.1f} días"),
                 "Programa Hoy / Post-Entrega": df_alertas['programa']
             })
