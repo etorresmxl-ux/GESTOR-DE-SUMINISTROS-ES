@@ -1,3 +1,4 @@
+import hashlib
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
@@ -343,8 +344,58 @@ def render(conn):
                     calendario, fuera_de_rango = construir_calendario(
                         df_ordenes, {p.upper() for p in productos_disponibles_estacion}, date.today()
                     )
-                    st.caption("Volumen programado por día y producto (si hay varias cargas el mismo día, se suman).")
-                    st.dataframe(estilo_calendario(calendario), width='stretch')
+                    fecha_por_columna = {c: date.today() + timedelta(days=i) for i, c in enumerate(calendario.columns)}
+                    ordenes_idx = df_ordenes.assign(
+                        _prod=df_ordenes['producto'].map(_clave_producto),
+                        _fecha=pd.to_datetime(df_ordenes['fecha_programacion']).dt.date,
+                    )
+                    # La llave cambia cuando cambia el calendario: así la selección se limpia sola tras guardar o eliminar.
+                    huella = hashlib.md5("|".join(calendario.to_numpy().ravel()).encode()).hexdigest()[:8]
+
+                    st.caption(
+                        "Volumen programado por día y producto (si hay varias cargas el mismo día, se suman). "
+                        "👆 Haz clic en una celda con carga para modificarla o eliminarla."
+                    )
+                    try:
+                        evento = st.dataframe(
+                            estilo_calendario(calendario), width='stretch',
+                            key=f"cal_ordenes_{estacion_id_sel}_{huella}",
+                            on_select="rerun", selection_mode="single-cell",
+                        )
+                    except Exception:
+                        # Versión de Streamlit sin selección de celdas: el calendario se ve igual, sin clic.
+                        evento = None
+                        st.dataframe(estilo_calendario(calendario), width='stretch')
+                        st.caption("Tu versión de Streamlit aún no permite seleccionar celdas; usa el selector de folio.")
+
+                    celdas = ((evento.get("selection") or {}).get("cells") or []) if evento is not None else []
+                    celda_clave, folios_celda = None, []
+                    if celdas:
+                        fila_pos, col_nombre = celdas[0]
+                        prod_celda = str(calendario.index[fila_pos]).upper()
+                        celda_clave = (estacion_id_sel, prod_celda, col_nombre)
+                        fecha_celda = fecha_por_columna.get(col_nombre)
+                        folios_celda = sorted(int(f) for f in ordenes_idx.loc[
+                            (ordenes_idx['_prod'] == prod_celda) & (ordenes_idx['_fecha'] == fecha_celda), 'orden_carga'
+                        ])
+
+                    if celda_clave is None:
+                        st.session_state.pop("_celda_orden_procesada", None)
+                    elif st.session_state.get("_celda_orden_procesada") != celda_clave:
+                        # Solo al hacer clic en una celda nueva se actualiza el formulario;
+                        # si luego eliges otro folio a mano, se respeta tu elección.
+                        st.session_state["_celda_orden_procesada"] = celda_clave
+                        if folios_celda:
+                            st.session_state["folio_sel_orden"] = folios_celda[0]
+
+                    if celda_clave is not None:
+                        if not folios_celda:
+                            st.info("No hay cargas en esa celda.")
+                        elif len(folios_celda) == 1:
+                            st.info(f"✏️ Orden #{folios_celda[0]} lista en el formulario de modificación (abajo).")
+                        else:
+                            lista = ", ".join(f"#{f}" for f in folios_celda)
+                            st.info(f"✏️ Hay {len(folios_celda)} órdenes en esa celda ({lista}). Elige cuál modificar en el selector de folio (abajo).")
                     if fuera_de_rango:
                         st.caption(f"Hay {fuera_de_rango} orden(es) más allá del rango mostrado; consúltalas en el detalle por folio.")
                     with st.expander("Ver detalle por folio"):
@@ -353,7 +404,9 @@ def render(conn):
                     st.markdown("##### ⚙️ Modificar o Eliminar una Orden de Carga")
                     col_id_sel, col_acc = st.columns(2)
                     with col_id_sel:
-                        ids_disponibles = df_ordenes['orden_carga'].tolist()
+                        ids_disponibles = [int(i) for i in df_ordenes['orden_carga'].tolist()]
+                        if st.session_state.get("folio_sel_orden") not in ids_disponibles:
+                            st.session_state["folio_sel_orden"] = ids_disponibles[0]
                         etiquetas_ordenes = {
                             int(r.orden_carga): (
                                 f"#{int(r.orden_carga)} · {r.producto} · "
@@ -365,21 +418,23 @@ def render(conn):
                         sel_orden_id = st.selectbox(
                             "Selecciona el Folio (Orden de Carga) a administrar:",
                             ids_disponibles,
+                            key="folio_sel_orden",
                             format_func=lambda i: etiquetas_ordenes.get(int(i), str(i)),
                         )
                     
                     row_orden_act = df_ordenes[df_ordenes['orden_carga'] == sel_orden_id].iloc[0]
+                    sufijo_form = f"{sel_orden_id}_{row_orden_act['volumen_programado']}_{row_orden_act['fecha_programacion']}_{row_orden_act['producto']}"
 
                     with st.form("form_editar_orden"):
                         ce1, ce2, ce3 = st.columns(3)
                         with ce1:
-                            nuevo_vol = st.number_input("Modificar Volumen (L):", value=float(row_orden_act['volumen_programado']), step=100.0)
+                            nuevo_vol = st.number_input("Modificar Volumen (L):", value=float(row_orden_act['volumen_programado']), step=100.0, key=f"ed_vol_{sufijo_form}")
                         with ce2:
                             fecha_actual_obj = pd.to_datetime(row_orden_act['fecha_programacion']).date()
-                            nueva_fecha = st.date_input("Modificar Fecha:", value=fecha_actual_obj, min_value=date.today())
+                            nueva_fecha = st.date_input("Modificar Fecha:", value=fecha_actual_obj, min_value=date.today(), key=f"ed_fecha_{sufijo_form}")
                         with ce3:
                             prod_actual = row_orden_act['producto']
-                            nuevo_prod = st.selectbox("Modificar Producto:", ["REGULAR", "PREMIUM", "DIESEL"], index=0 if "REGULAR" in prod_actual.upper() else (1 if "PREMIUM" in prod_actual.upper() else 2))
+                            nuevo_prod = st.selectbox("Modificar Producto:", ["REGULAR", "PREMIUM", "DIESEL"], index=0 if "REGULAR" in prod_actual.upper() else (1 if "PREMIUM" in prod_actual.upper() else 2), key=f"ed_prod_{sufijo_form}")
 
                         b_upd, b_del = st.columns(2)
                         with b_upd:
