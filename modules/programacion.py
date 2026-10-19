@@ -75,11 +75,6 @@ def render(conn):
         st.error("No hay conexión a la base de datos.")
         return
 
-    # Notificación persistente tras recarga (st.rerun)
-    if "mensaje_exito_orden" in st.session_state:
-        st.success(st.session_state["mensaje_exito_orden"])
-        del st.session_state["mensaje_exito_orden"]
-
     try:
         # 1. Consultar estaciones y programadores desde estaciones_detalle
         query_base = """
@@ -325,6 +320,11 @@ def render(conn):
                             conn.rollback()
                             cursor.close()
                             st.error(f"Error al registrar la orden: {err}")
+
+            # Notificación persistente tras recarga (ubicada exactamente debajo del formulario y antes del calendario)
+            if "mensaje_exito_orden" in st.session_state:
+                st.success(st.session_state["mensaje_exito_orden"])
+                del st.session_state["mensaje_exito_orden"]
 
             st.markdown("---")
             st.markdown("##### 🔍 Órdenes de Carga Registradas (Vigentes y Futuras)")
