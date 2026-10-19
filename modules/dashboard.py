@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime
-import pytz
+from datetime import datetime, timezone, timedelta
 
 def normalizar_producto(producto_raw):
     """
@@ -84,8 +83,8 @@ def render(conn):
             st.warning("No hay datos suficientes para generar el resumen.")
             return
 
-        # Forzar zona horaria local (Tijuana / Mexicali) para evitar desfases UTC en el servidor
-        tz_local = pytz.timezone('America/Tijuana')
+        # Obtener la fecha local usando timedelta (UTC-7 para la zona horaria del Noroeste/Mexicali de forma nativa)
+        tz_local = timezone(timedelta(hours=-7))
         hoy = datetime.now(tz_local).date()
         hoy_str = hoy.strftime("%Y-%m-%d")
 
@@ -143,7 +142,7 @@ def render(conn):
             if dias_transcurridos > 0:
                 current_date = f_inv_date
                 for _ in range(dias_transcurridos):
-                    current_date = current_date + pd.Timedelta(days=1)
+                    current_date = current_date + timedelta(days=1)
                     curr_str = current_date.strftime("%Y-%m-%d")
                     
                     # Descontar VDP y sumar descargas reales de ese día específico
@@ -172,7 +171,6 @@ def render(conn):
         # Consultar únicamente las cargas programadas para el DÍA DE HOY (acumulando múltiples folios de forma segura)
         cargas_hoy = {} # {(estacion_id, producto_key): volumen_total_programado_hoy}
         try:
-            # Usamos coincidencia de texto parcial en la fecha para evitar problemas de tipo en PostgreSQL
             query_cargas = f"""
                 SELECT id_estacion, producto, volumen_programado
                 FROM programacion_cargas
