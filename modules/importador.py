@@ -152,13 +152,14 @@ def render(conn):
                 st.error(f"Error al procesar el archivo de ventas: {e}")
 
     # ==========================================
-    # 3. ÓRDENES DE CARGA (PROGRAMACIÓN / SINCRONIZACIÓN FUTURA BLINDADA)
+    # 3. ÓRDENES DE CARGA (PLANTILLA UNIFICADA)
     # ==========================================
     with tab_prog:
         st.subheader("Carga Masiva de Órdenes de Carga (Actualización de Programa)")
-        st.write("Sube la actualización semanal del programa. **El sistema sincronizará y actualizará el horizonte futuro** (a partir de hoy) con estos nuevos valores, permitiendo reflejar cambios o cancelaciones (ceros), sin modificar el pasado histórico.")
+        st.write("Sube la actualización semanal del programa. La plantilla unificada contiene las columnas: `id_estacion`, `fecha`, `regular`, `premium` y `diesel`.")
         
-        df_plantilla_prog = pd.DataFrame(columns=["id_estacion", "producto", "fecha_programacion", "volumen_programado"])
+        # Plantilla unificada de 1 fila por fecha y estación
+        df_plantilla_prog = pd.DataFrame(columns=["id_estacion", "fecha", "regular", "premium", "diesel"])
         st.download_button(
             label="📥 Descargar Plantilla Excel (Órdenes de Carga)",
             data=dataframe_a_excel_bytes(df_plantilla_prog),
@@ -173,8 +174,10 @@ def render(conn):
         if file_prog is not None:
             try:
                 df_prog = pd.read_csv(file_prog) if file_prog.name.endswith('.csv') else pd.read_excel(file_prog)
-                df_prog['fecha_programacion'] = df_prog['fecha_programacion'].apply(limpiar_fecha)
-                df_prog['volumen_programado'] = df_prog['volumen_programado'].apply(limpiar_numero_preservando_ceros)
+                df_prog['fecha'] = df_prog['fecha'].apply(limpiar_fecha)
+                for col in ['regular', 'premium', 'diesel']:
+                    if col in df_prog.columns:
+                        df_prog[col] = df_prog[col].apply(limpiar_numero_preservando_ceros)
 
                 st.info(f"📊 Archivo cargado y sanitizado. Total de registros en archivo: {len(df_prog)}")
                 st.dataframe(df_prog, width='stretch', height=250)
@@ -184,33 +187,40 @@ def render(conn):
                     cursor = conn.cursor()
                     
                     count_inserciones = 0
+                    mapeo_productos = {
+                        'regular': 'Regular',
+                        'premium': 'Premium',
+                        'diesel': 'Diesel'
+                    }
                     
                     for _, row in df_prog.iterrows():
-                        fecha_p = row['fecha_programacion']
+                        fecha_p = row['fecha']
                         estacion = str(row['id_estacion']).strip()
-                        producto = str(row['producto']).strip()
-                        volumen = row['volumen_programado']
 
-                        if pd.notna(fecha_p) and pd.notna(volumen) and estacion != "":
-                            # Solo aplicamos la sincronización si la fecha es de hoy en adelante (futuro)
-                            if fecha_p >= hoy_str:
-                                # Eliminación blindada normalizando espacios y mayúsculas
-                                cursor.execute("""
-                                    DELETE FROM programacion_cargas 
-                                    WHERE UPPER(TRIM(id_estacion)) = UPPER(TRIM(%s)) 
-                                      AND UPPER(TRIM(producto)) = UPPER(TRIM(%s)) 
-                                      AND fecha_programacion = %s;
-                                """, (estacion, producto, fecha_p))
-                            
-                            # Insertamos la nueva orden actualizada del Excel
-                            cursor.execute("""
-                                INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado, "user", creado_en)
-                                VALUES (%s, %s, %s, %s, 'Importación Masiva', NOW());
-                            """, (estacion, producto, fecha_p, volumen))
-                            count_inserciones += 1
+                        if pd.notna(fecha_p) and estacion != "":
+                            # Recorremos cada uno de los 3 productos en la misma fila
+                            for col_prod, nombre_db in mapeo_productos.items():
+                                if col_prod in df_prog.columns and pd.notna(row[col_prod]):
+                                    volumen = float(row[col_prod])
+                                    
+                                    # Sincronización inteligente para el futuro (>= hoy)
+                                    if fecha_p >= hoy_str:
+                                        cursor.execute("""
+                                            DELETE FROM programacion_cargas 
+                                            WHERE UPPER(TRIM(id_estacion)) = UPPER(TRIM(%s)) 
+                                              AND UPPER(TRIM(producto)) = UPPER(TRIM(%s)) 
+                                              AND fecha_programacion = %s;
+                                        """, (estacion, nombre_db, fecha_p))
+                                    
+                                    # Insertar nueva orden (incluso si es 0.0 para reflejar cancelación)
+                                    cursor.execute("""
+                                        INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado, "user", creado_en)
+                                        VALUES (%s, %s, %s, %s, 'Importación Masiva', NOW());
+                                    """, (estacion, nombre_db, fecha_p, volumen))
+                                    count_inserciones += 1
 
                     conn.commit()
                     cursor.close()
-                    st.success(f"¡Sincronización completada! Se procesaron {count_inserciones} órdenes actualizando el horizonte futuro de forma limpia.")
+                    st.success(f"¡Sincronización completada! Se procesaron {count_inserciones} órdenes de cargas actualizando el horizonte futuro de forma limpia.")
             except Exception as e:
                 st.error(f"Error al procesar la programación: {e}")
