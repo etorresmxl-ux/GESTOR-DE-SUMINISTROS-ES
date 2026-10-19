@@ -199,4 +199,145 @@ def render(conn):
                     inv_fin_prev = inv_fin
                     ds = (inv_fin / vta) if vta > 0 else 0.0
 
-                    inv_fin_str
+                    inv_fin_str = f"⚠️ {inv_fin:,.0f}" if inv_fin < 5000 else f"{inv_fin:,.0f}"
+                    carga_str = f"⚠️ {carga:,.0f}" if (carga > 0 and carga > espacio_disp) else (f"{carga:,.0f}" if carga > 0 else "-")
+                    ds_str = f"🔴 {ds:.1f} d" if ds < 1.0 else (f"🟡 {ds:.1f} d" if ds < 2.0 else f"🟢 {ds:.1f} d")
+
+                    inv_ini_row.append(inv_ini_str)
+                    espacio_disp_row.append(f"{espacio_disp:,.0f}")
+                    carga_row.append(carga_str)
+                    vta_row.append(f"{vta:,.0f}")
+                    inv_fin_row.append(inv_fin_str)
+                    ds_row.append(ds_str)
+
+                df_matriz = pd.DataFrame(
+                    [inv_ini_row, espacio_disp_row, carga_row, vta_row, inv_fin_row, ds_row],
+                    index=["Inventario Inicial", "Espacio disponible", "Programa (Carga Total)", "Venta Proyectada", "Inventario Final", "D/S (Final)"],
+                    columns=col_names_matrix
+                )
+                st.dataframe(df_matriz, width='stretch')
+                st.markdown("")
+
+        # ==========================================
+        # PESTAÑA 2: GESTIÓN DE ÓRDENES DE CARGA
+        # ==========================================
+        with tab_gestion:
+            st.markdown("#### 📋 Alta, Modificación y Eliminación de Órdenes de Carga")
+            st.write("Crea órdenes independientes (soporta múltiples cargas el mismo día). **Candado activo:** No se permiten fechas de programación pasadas.")
+
+            # Formulario de alta
+            with st.form("form_crear_orden_carga", clear_on_submit=True):
+                st.markdown("##### ➕ Registrar Nueva Orden de Carga")
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    prod_opciones = [p[0] for p in productos_todos if p[1] in productos_disponibles_estacion or capacidades.get(p[1], 0.0) > 0]
+                    if not prod_opciones: prod_opciones = ["REGULAR", "PREMIUM", "DIESEL"]
+                    sel_prod_alta = st.selectbox("Producto:", prod_opciones)
+                with c2:
+                    sel_fecha_alta = st.date_input("Fecha de Programación:", value=date.today(), min_value=date.today())
+                with c3:
+                    sel_vol_alta = st.number_input("Volumen (Litros):", min_value=0.0, value=0.0, step=100.0)
+
+                submitted_alta = st.form_submit_button("🚀 Generar Orden de Carga")
+                if submitted_alta:
+                    if sel_vol_alta <= 0:
+                        st.warning("⚠️ Por favor ingresa un volumen mayor a 0 litros.")
+                    else:
+                        cursor = conn.cursor()
+                        try:
+                            f_str = sel_fecha_alta.strftime("%Y-%m-%d")
+                            insert_query = f"""
+                                INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado)
+                                VALUES ('{estacion_id_sel}', '{sel_prod_alta}', '{f_str}', {sel_vol_alta});
+                            """
+                            cursor.execute(insert_query)
+                            conn.commit()
+                            cursor.close()
+                            
+                            st.session_state["mensaje_exito_orden"] = f"✅ ¡Orden de Carga registrada exitosamente! ({sel_prod_alta} - {sel_vol_alta:,.0f} L para {f_str})"
+                            st.rerun()
+                        except Exception as err:
+                            conn.rollback()
+                            cursor.close()
+                            st.error(f"Error al registrar la orden: {err}")
+
+            st.markdown("---")
+            st.markdown("##### 🔍 Órdenes de Carga Registradas (Vigentes y Futuras)")
+            
+            try:
+                query_tabla_ordenes = f"""
+                    SELECT id AS orden_carga, producto, fecha_programacion, volumen_programado, creado_en
+                    FROM programacion_cargas
+                    WHERE id_estacion = '{estacion_id_sel}' AND fecha_programacion >= '{date.today().strftime("%Y-%m-%d")}'
+                    ORDER BY fecha_programacion ASC;
+                """
+                df_ordenes = pd.read_sql(query_tabla_ordenes, conn)
+
+                if df_ordenes.empty:
+                    st.info("No hay órdenes de carga activas para esta estación.")
+                else:
+                    st.dataframe(df_ordenes, width='stretch', hide_index=True)
+
+                    st.markdown("##### ⚙️ Modificar o Eliminar una Orden de Carga")
+                    col_id_sel, col_acc = st.columns(2)
+                    with col_id_sel:
+                        ids_disponibles = df_ordenes['orden_carga'].tolist()
+                        sel_orden_id = st.selectbox("Selecciona el Folio (Orden de Carga) a administrar:", ids_disponibles)
+                    
+                    row_orden_act = df_ordenes[df_ordenes['orden_carga'] == sel_orden_id].iloc[0]
+
+                    with st.form("form_editar_orden"):
+                        ce1, ce2, ce3 = st.columns(3)
+                        with ce1:
+                            nuevo_vol = st.number_input("Modificar Volumen (L):", value=float(row_orden_act['volumen_programado']), step=100.0)
+                        with ce2:
+                            fecha_actual_obj = pd.to_datetime(row_orden_act['fecha_programacion']).date()
+                            nueva_fecha = st.date_input("Modificar Fecha:", value=fecha_actual_obj, min_value=date.today())
+                        with ce3:
+                            prod_actual = row_orden_act['producto']
+                            nuevo_prod = st.selectbox("Modificar Producto:", ["REGULAR", "PREMIUM", "DIESEL"], index=0 if "REGULAR" in prod_actual.upper() else (1 if "PREMIUM" in prod_actual.upper() else 2))
+
+                        b_upd, b_del = st.columns(2)
+                        with b_upd:
+                            submitted_update = st.form_submit_button("💾 Guardar Cambios en la Orden")
+                        with b_del:
+                            submitted_delete = st.form_submit_button("🗑️ Eliminar Orden de Carga", type="primary")
+
+                        if submitted_update:
+                            cursor = conn.cursor()
+                            try:
+                                f_str_u = nueva_fecha.strftime("%Y-%m-%d")
+                                q_upd = f"""
+                                    UPDATE programacion_cargas 
+                                    SET volumen_programado = {nuevo_vol}, fecha_programacion = '{f_str_u}', producto = '{nuevo_prod}'
+                                    WHERE id = {sel_orden_id};
+                                """
+                                cursor.execute(q_upd)
+                                conn.commit()
+                                cursor.close()
+                                st.session_state["mensaje_exito_orden"] = f"✅ Orden de Carga #{sel_orden_id} actualizada correctamente."
+                                st.rerun()
+                            except Exception as e_upd:
+                                conn.rollback()
+                                cursor.close()
+                                st.error(f"Error al actualizar: {e_upd}")
+
+                        if submitted_delete:
+                            cursor = conn.cursor()
+                            try:
+                                q_del = f"DELETE FROM programacion_cargas WHERE id = {sel_orden_id};"
+                                cursor.execute(q_del)
+                                conn.commit()
+                                cursor.close()
+                                st.session_state["mensaje_exito_orden"] = f"🗑️ Orden de Carga #{sel_orden_id} eliminada del sistema."
+                                st.rerun()
+                            except Exception as e_del:
+                                conn.rollback()
+                                cursor.close()
+                                st.error(f"Error al eliminar: {e_del}")
+
+            except Exception as e_ord:
+                st.warning(f"Error al consultar las órdenes de carga: {e_ord}")
+
+    except Exception as e:
+        st.error(f"Error en la matriz de programación: {e}")
