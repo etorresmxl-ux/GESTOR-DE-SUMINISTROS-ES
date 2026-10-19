@@ -9,8 +9,12 @@ st.set_page_config(
     layout="wide"
 )
 
+# Título resumido en la parte superior del menú lateral
+st.sidebar.title("⛽ Gestión de Suministro")
+st.sidebar.markdown("---")
+
 # Menú lateral fijo mediante radio buttons con el orden solicitado
-st.sidebar.title("Navegación")
+st.sidebar.markdown("### Navegación")
 menu = st.sidebar.radio(
     "Selecciona un Módulo",
     [
@@ -20,7 +24,8 @@ menu = st.sidebar.radio(
         "📊 Registro de Ventas",
         "🚛 Administrador de Cargas",
         "📥 Importar Masivos (CSV)"
-    ]
+    ],
+    label_visibility="collapsed"
 )
 
 # ==========================================
