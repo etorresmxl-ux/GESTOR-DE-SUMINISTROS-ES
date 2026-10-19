@@ -23,6 +23,23 @@ def normalizar_producto(producto_raw):
         return p_str
 
 def render(conn):
+    # Definir fecha y hora local (UTC-7 / Noroeste / Mexicali)
+    tz_local = timezone(timedelta(hours=-7))
+    ahora_local = datetime.now(tz_local)
+    hoy = ahora_local.date()
+    hoy_str = hoy.strftime("%Y-%m-%d")
+
+    # Indicador de fecha y hora local en el menú lateral (inferior)
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(
+        f"<div style='text-align: center; color: #aaa; font-size: 0.85em; padding: 10px;'>"
+        f"🕒 <b>Reloj del Sistema</b><br>"
+        f"📅 {ahora_local.strftime('%Y-%m-%d')}<br>"
+        f"⏱️ {ahora_local.strftime('%H:%M:%S')} (UTC-7)"
+        f"</div>",
+        unsafe_allow_html=True
+    )
+
     st.markdown("### 📊 Dashboard Operativo - Inventarios, Espacio Disponible y Días de Suministro (D/S)")
     st.write("Resumen general por estación: Inventario teórico/actualizado al día de hoy (con indicador * si es arrastrado), capacidad máxima, cargas del día y Días de Suministro (VDP 12 semanas).")
     
@@ -83,31 +100,30 @@ def render(conn):
             st.warning("No hay datos suficientes para generar el resumen.")
             return
 
-        # Obtener la fecha local usando timedelta (UTC-7 para la zona horaria del Noroeste/Mexicali de forma nativa)
-        tz_local = timezone(timedelta(hours=-7))
-        hoy = datetime.now(tz_local).date()
-        hoy_str = hoy.strftime("%Y-%m-%d")
-
-        # 1. Consultar descargas reales en bitacora_descargas para ajustar el inventario histórico al día de hoy
+        # 1. Consultar descargas reales de forma segura y flexible
         descargas_reales = {} # {(estacion_id, producto_key, fecha_str): volumen_total_descargado}
         try:
-            query_bitacora_hist = """
-                SELECT id_estacion, producto, fecha_descarga_real, cantidad_natural 
-                FROM bitacora_descargas;
-            """
-            df_bit_hist = pd.read_sql(query_bitacora_hist, conn)
+            df_bit_hist = pd.read_sql("SELECT * FROM bitacora_descargas;", conn)
             if not df_bit_hist.empty:
-                for _, rb in df_bit_hist.iterrows():
-                    e_id = str(rb['id_estacion']).strip()
-                    pk = normalizar_producto(rb['producto'])
-                    
-                    f_desc = pd.to_datetime(rb['fecha_descarga_real']).strftime("%Y-%m-%d")
-                    vol_real = float(rb['cantidad_natural']) if pd.notna(rb['cantidad_natural']) else 0.0
-                    
-                    key = (e_id, pk, f_desc)
-                    descargas_reales[key] = descargas_reales.get(key, 0.0) + vol_real
+                col_est = next((c for c in df_bit_hist.columns if 'estacion' in c.lower()), None)
+                col_prod = next((c for c in df_bit_hist.columns if 'producto' in c.lower()), None)
+                col_fecha = next((c for c in df_bit_hist.columns if 'fecha' in c.lower()), None)
+                col_cant = next((c for c in df_bit_hist.columns if 'cant' in c.lower() or 'vol' in c.lower() or 'natural' in c.lower()), None)
+                
+                if col_est and col_prod and col_fecha and col_cant:
+                    for _, rb in df_bit_hist.iterrows():
+                        e_id = str(rb[col_est]).strip()
+                        pk = normalizar_producto(rb[col_prod])
+                        f_desc = pd.to_datetime(rb[col_fecha]).strftime("%Y-%m-%d")
+                        vol_real = float(rb[col_cant]) if pd.notna(rb[col_cant]) else 0.0
+                        
+                        key = (e_id, pk, f_desc)
+                        descargas_reales[key] = descargas_reales.get(key, 0.0) + vol_real
         except Exception as e:
-            st.warning(f"Aviso al consultar bitácora de descargas: {e}")
+            try:
+                conn.rollback() # Limpiar estado de transacción si la tabla no existe o falla
+            except:
+                pass
 
         # 2. Ajustar el inventario de cada estación descontando ventas y sumando descargas reales transcurridas
         inventarios_actualizados_reg = []
@@ -125,11 +141,8 @@ def render(conn):
                 continue
                 
             f_inv_date = pd.to_datetime(f_inv).date()
-            
-            # Si la fecha del inventario es hoy o futura, se queda igual; si es pasada, proyectamos día por día
             dias_transcurridos = (hoy - f_inv_date).days
             
-            # Valores base
             inv_r = float(r['reg_litros'])
             inv_p = float(r['pre_litros'])
             inv_d = float(r['die_litros'])
@@ -138,19 +151,16 @@ def render(conn):
             vdp_p = float(r['vdp_pre'])
             vdp_d = float(r['vdp_die'])
 
-            # Simular el desgaste y entradas día por día desde el día posterior al inventario hasta hoy
             if dias_transcurridos > 0:
                 current_date = f_inv_date
                 for _ in range(dias_transcurridos):
                     current_date = current_date + timedelta(days=1)
                     curr_str = current_date.strftime("%Y-%m-%d")
                     
-                    # Descontar VDP y sumar descargas reales de ese día específico
                     inv_r = inv_r - vdp_r + descargas_reales.get((est_id, 'regular', curr_str), 0.0)
                     inv_p = inv_p - vdp_p + descargas_reales.get((est_id, 'premium', curr_str), 0.0)
                     inv_d = inv_d - vdp_d + descargas_reales.get((est_id, 'diesel', curr_str), 0.0)
             
-            # Evitar negativos lógicos
             inventarios_actualizados_reg.append(max(0.0, inv_r))
             inventarios_actualizados_pre.append(max(0.0, inv_p))
             inventarios_actualizados_die.append(max(0.0, inv_d))
@@ -159,7 +169,6 @@ def render(conn):
         df['pre_litros_calc'] = inventarios_actualizados_pre
         df['die_litros_calc'] = inventarios_actualizados_die
 
-        # Función auxiliar para determinar si el inventario es teórico (si el último registro físico no es de hoy)
         def formato_inv(litros, fecha_inv):
             if pd.isna(fecha_inv):
                 return "N/A", True
@@ -168,7 +177,7 @@ def render(conn):
             prefijo = "*" if es_teorico else ""
             return f"{prefijo}{litros:,.0f} L", es_teorico
 
-        # Consultar únicamente las cargas programadas para el DÍA DE HOY (acumulando múltiples folios de forma segura)
+        # Consultar cargas programadas para el DÍA DE HOY de forma segura (con rollback preventivo)
         cargas_hoy = {} # {(estacion_id, producto_key): volumen_total_programado_hoy}
         try:
             query_cargas = f"""
@@ -186,12 +195,15 @@ def render(conn):
                     key_carga = (est_id, pk)
                     cargas_hoy[key_carga] = cargas_hoy.get(key_carga, 0.0) + vol
         except Exception as e:
-            st.warning(f"Aviso al consultar cargas programadas de hoy: {e}")
+            try:
+                conn.rollback()
+            except:
+                pass
 
         # Calcular días de suministro actuales utilizando el inventario proyectado a hoy
         df['ds_r'] = df.apply(lambda r: round(r['reg_litros_calc'] / r['vdp_reg'], 1) if r['cap_regular'] > 0 and r['vdp_reg'] > 0 else np.nan, axis=1)
         df['ds_p'] = df.apply(lambda r: round(r['pre_litros_calc'] / r['vdp_pre'], 1) if r['cap_premium'] > 0 and r['vdp_pre'] > 0 else np.nan, axis=1)
-        df['ds_d'] = df.apply(lambda r: round(r['die_litros_calc'] / r['vdp_die'], 1) if r['cap_diesel'] > 0 and r['vdp_die'] > 0 else np.nan, axis=1)
+        df['ds_d'] = df.apply(lambda r: round(r['die_litros_calc'] / r['vdp_die'], 1) if r['cap_diesel'] > 0 and r['vdp_diesel'] > 0 else np.nan, axis=1)
 
         # Calcular espacio disponible
         df['espacio_r'] = df.apply(lambda r: max(0, r['cap_regular'] - r['reg_litros_calc']) if r['cap_regular'] > 0 else np.nan, axis=1)
@@ -221,7 +233,6 @@ def render(conn):
                         nivel = "🔴 CRÍTICO (< 1 Día)" if ds < 1.0 else "🟡 ADVERTENCIA (< 2 Días)"
                         
                         str_inv_actual, _ = formato_inv(litros, f_inv)
-                        
                         vol_carga_hoy = cargas_hoy.get((est_id, p_key), 0.0)
                         
                         if vol_carga_hoy > 0:
