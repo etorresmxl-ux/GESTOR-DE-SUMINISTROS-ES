@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import date, datetime
+from datetime import datetime
+import pytz
 
 def normalizar_producto(producto_raw):
     """
@@ -83,7 +84,9 @@ def render(conn):
             st.warning("No hay datos suficientes para generar el resumen.")
             return
 
-        hoy = date.today()
+        # Forzar zona horaria local (Tijuana / Mexicali) para evitar desfases UTC en el servidor
+        tz_local = pytz.timezone('America/Tijuana')
+        hoy = datetime.now(tz_local).date()
         hoy_str = hoy.strftime("%Y-%m-%d")
 
         # 1. Consultar descargas reales en bitacora_descargas para ajustar el inventario histórico al día de hoy
@@ -172,7 +175,7 @@ def render(conn):
             query_cargas = f"""
                 SELECT id_estacion, producto, volumen_programado
                 FROM programacion_cargas
-                WHERE fecha_programacion = '{hoy_str}';
+                WHERE fecha_programacion::date = '{hoy_str}'::date;
             """
             df_cargas = pd.read_sql(query_cargas, conn)
             if not df_cargas.empty:
