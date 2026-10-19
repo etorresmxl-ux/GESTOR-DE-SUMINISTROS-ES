@@ -14,8 +14,9 @@ def limpiar_fecha(val):
     except Exception:
         return None
 
-def limpiar_numero(val):
-    """Limpia el número, elimina caracteres extra y convierte 0 o celdas vacías en None (NULL)."""
+def limpiar_numero_preservando_ceros(val):
+    """Limpia el número, elimina caracteres extra. 
+    Permite que el 0 sea un valor válido, pero descarta celdas vacías o nulas."""
     if pd.isna(val):
         return None
     val_str = str(val).strip()
@@ -24,9 +25,9 @@ def limpiar_numero(val):
     val_limpio = re.sub(r'[^\d.-]', '', val_str)
     try:
         num = float(val_limpio)
-        if pd.isna(num) or num == 0.0:
+        if pd.isna(num):
             return None
-        return num
+        return num # ¡Aquí permitimos que el 0.0 pase como un número válido a actualizar!
     except ValueError:
         return None
 
@@ -38,7 +39,7 @@ def dataframe_a_excel_bytes(df):
 
 def render(conn):
     st.markdown("### 📥 Módulo de Importación Masiva (Excel / CSV)")
-    st.write("Sube tus archivos de Excel (`.xlsx`) o CSV. Los valores vacíos o en ceros **no sobrescribirán** los datos existentes; el sistema conservará los valores previos si no se proporciona un dato nuevo.")
+    st.write("Sube tus archivos de Excel (`.xlsx`) o CSV. Los **ceros (0)** sí se actualizarán, mientras que las **celdas vacías** se ignorarán conservando el valor previo de la base de datos.")
     
     tab_inv, tab_ventas, tab_prog = st.tabs(["📦 Inventarios Históricos", "📊 Ventas Históricas", "🚛 Órdenes de Carga"])
     
@@ -70,7 +71,7 @@ def render(conn):
                 df_inv['fecha'] = df_inv['fecha'].apply(limpiar_fecha)
                 for col in ['regular', 'premium', 'diesel']:
                     if col in df_inv.columns:
-                        df_inv[col] = df_inv[col].apply(limpiar_numero)
+                        df_inv[col] = df_inv[col].apply(limpiar_numero_preservando_ceros)
 
                 cursor = conn.cursor()
                 cursor.execute("SELECT id_estacion, producto, capacidad_maxima FROM estaciones_detalle;")
@@ -108,7 +109,7 @@ def render(conn):
 
                 if st.button("🚀 Procesar e Importar Inventarios", key="btn_imp_inv"):
                     cursor = conn.cursor()
-                    # COALESCE preserva el valor actual de la tabla si el dato entrante es NULL
+                    # COALESCE mantiene el valor anterior solo si el valor entrante es NULL (vacío). El 0 sí pasa.
                     sql_upsert_inv = """
                         INSERT INTO inventarios_historico (estacion_id, fecha, regular, premium, diesel)
                         VALUES (%s, %s, %s, %s, %s)
@@ -134,7 +135,7 @@ def render(conn):
                             count += 1
                     conn.commit()
                     cursor.close()
-                    st.success(f"¡Se procesaron e importaron {count} registros de inventarios exitosamente (respetando datos previos en vacíos/ceros)!")
+                    st.success(f"¡Se procesaron e importaron {count} registros de inventarios exitosamente!")
             except Exception as e:
                 st.error(f"Error al procesar el archivo: {e}")
 
@@ -166,7 +167,7 @@ def render(conn):
                 df_ventas['fecha'] = df_ventas['fecha'].apply(limpiar_fecha)
                 for col in ['regular', 'premium', 'diesel']:
                     if col in df_ventas.columns:
-                        df_ventas[col] = df_ventas[col].apply(limpiar_numero)
+                        df_ventas[col] = df_ventas[col].apply(limpiar_numero_preservando_ceros)
 
                 st.info(f"📊 Archivo cargado y sanitizado. Total de registros: {len(df_ventas)}")
                 st.dataframe(df_ventas, width='stretch', height=250)
@@ -229,7 +230,7 @@ def render(conn):
                     df_prog = pd.read_excel(file_prog)
 
                 df_prog['fecha_programacion'] = df_prog['fecha_programacion'].apply(limpiar_fecha)
-                df_prog['volumen_programado'] = df_prog['volumen_programado'].apply(limpiar_numero)
+                df_prog['volumen_programado'] = df_prog['volumen_programado'].apply(limpiar_numero_preservando_ceros)
 
                 st.info(f"📊 Archivo cargado y sanitizado. Total de registros: {len(df_prog)}")
                 st.dataframe(df_prog, width='stretch', height=250)
