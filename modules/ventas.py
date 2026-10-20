@@ -14,6 +14,9 @@ def evaluar_y_gestionar_venta(conn, estacion_id, fecha_str, producto, volumen, m
         cursor.close()
         return "IGNORADO"
 
+    # Definimos el umbral aquí para garantizar que esté disponible en todo el ámbito de la función
+    UMBRAL_Z = 2.5 # Ocurre en menos del 1% de los casos por azar
+
     try:
         # 1. Consultar el histórico reciente para ese mismo día de la semana (DOW)
         query_stats = f"""
@@ -43,7 +46,6 @@ def evaluar_y_gestionar_venta(conn, estacion_id, fecha_str, producto, volumen, m
 
         # 2. Calcular Z-Score
         z_score = float(abs(volumen - media) / desv_est) if desv_est > 0 else 0.0
-        UMBRAL_Z = 2.5 # Ocurre en menos del 1% de los casos por azar
 
         if z_score > UBRAL_Z:
             # ¡Anomalía detectada! Mandar a Cuarentena (ventas_anomalias)
