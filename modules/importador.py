@@ -15,7 +15,7 @@ def limpiar_fecha(val):
         return None
 
 def limpiar_numero(val):
-    """Limpia el número, elimina caracteres extra y convierte 0 o 0.0 en None (NULL)."""
+    """Limpia el número, elimina caracteres extra y convierte valores vacíos en None (NULL)."""
     if pd.isna(val):
         return None
     val_str = str(val).strip()
@@ -24,7 +24,7 @@ def limpiar_numero(val):
     val_limpio = re.sub(r'[^\d.-]', '', val_str)
     try:
         num = float(val_limpio)
-        if pd.isna(num) or num == 0.0:
+        if pd.isna(num):
             return None
         return num
     except ValueError:
@@ -112,9 +112,10 @@ def render(conn):
                         INSERT INTO inventarios_historico (estacion_id, fecha, regular, premium, diesel)
                         VALUES (%s, %s, %s, %s, %s)
                         ON CONFLICT (estacion_id, fecha) 
-                        DO UPDATE SET regular = EXCLUDED.regular,
-                                      premium = EXCLUDED.premium,
-                                      diesel = EXCLUDED.diesel;
+                        DO UPDATE SET 
+                            regular = COALESCE(EXCLUDED.regular, inventarios_historico.regular),
+                            premium = COALESCE(EXCLUDED.premium, inventarios_historico.premium),
+                            diesel = COALESCE(EXCLUDED.diesel, inventarios_historico.diesel);
                     """
                     count = 0
                     for _, row in df_inv.iterrows():
@@ -167,12 +168,11 @@ def render(conn):
                     if col in df_ventas.columns:
                         df_ventas[col] = df_ventas[col].apply(limpiar_numero)
 
-                # Consultar los promedios de venta ponderados o históricos por estación y producto
+                # Consultar los promedios de venta por estación y producto
                 cursor = conn.cursor()
                 try:
                     cursor.execute("SELECT estacion_id, producto, vdp FROM vdp_ponderado_12w;")
                 except Exception:
-                    # Alternativa si la estructura difiere o usa id_estacion
                     try:
                         cursor.execute("SELECT id_estacion, producto, vdp FROM vdp_ponderado_12w;")
                     except Exception:
@@ -186,7 +186,7 @@ def render(conn):
                     vdp_dict[(est_s, prod_s)] = vdp_val
                 cursor.close()
 
-                # Validación del rango +/- 30% respecto al promedio diario de venta (VDP)
+                # Validación del rango +/- 30% respecto al VDP
                 advertencias_ventas = []
                 for idx, row in df_ventas.iterrows():
                     est_id = str(row['estacion_id']).strip()
@@ -194,7 +194,6 @@ def render(conn):
                         if prod_key in df_ventas.columns and pd.notna(row[prod_key]):
                             val_venta = float(row[prod_key])
                             
-                            # Buscar el VDP correspondiente
                             vdp_promedio = 0.0
                             for (c_est, c_prod), c_val in vdp_dict.items():
                                 if c_est == est_id and prod_key in c_prod:
@@ -226,9 +225,10 @@ def render(conn):
                         INSERT INTO ventas_historico (estacion_id, fecha, regular, premium, diesel)
                         VALUES (%s, %s, %s, %s, %s)
                         ON CONFLICT (estacion_id, fecha) 
-                        DO UPDATE SET regular = EXCLUDED.regular,
-                                      premium = EXCLUDED.premium,
-                                      diesel = EXCLUDED.diesel;
+                        DO UPDATE SET 
+                            regular = COALESCE(EXCLUDED.regular, ventas_historico.regular),
+                            premium = COALESCE(EXCLUDED.premium, ventas_historico.premium),
+                            diesel = COALESCE(EXCLUDED.diesel, ventas_historico.diesel);
                     """
                     count = 0
                     for _, row in df_ventas.iterrows():
@@ -249,4 +249,4 @@ def render(conn):
                     cursor.close()
                     st.success(f"¡Se procesaron e importaron {count} registros de ventas exitosamente!")
             except Exception as e:
-                st.error(f5"Error al procesar el archivo de ventas: {e}")
+                st.error(f"Error al procesar el archivo de ventas: {e}")
