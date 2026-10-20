@@ -3,6 +3,9 @@ import pandas as pd
 import numpy as np
 from datetime import date, timedelta
 
+# Umbral Z global para evitar cualquier problema de alcance de variable
+UMBRAL_Z = 2.5
+
 def evaluar_y_gestionar_venta(conn, estacion_id, fecha_str, producto, volumen, metodo_carga):
     """
     Evalúa una venta usando Z-Score basado en las columnas horizontales (regular, premium, diesel)
@@ -13,9 +16,6 @@ def evaluar_y_gestionar_venta(conn, estacion_id, fecha_str, producto, volumen, m
     if prod_col not in ['regular', 'premium', 'diesel']:
         cursor.close()
         return "IGNORADO"
-
-    # Definimos el umbral aquí para garantizar que esté disponible en todo el ámbito de la función
-    UMBRAL_Z = 2.5 # Ocurre en menos del 1% de los casos por azar
 
     try:
         # 1. Consultar el histórico reciente para ese mismo día de la semana (DOW)
@@ -59,7 +59,7 @@ def evaluar_y_gestionar_venta(conn, estacion_id, fecha_str, producto, volumen, m
             return "NORMAL"
 
     except Exception as e:
-        conn.rollback() # Limpia la transacción abortada para permitir siguientes consultas en Supabase
+        conn.rollback() # Limpia la transacción abortada en Supabase
         cursor.close()
         print(f"Error al evaluar anomalía para {estacion_id} - {prod_col}: {e}")
         raise e
@@ -88,7 +88,7 @@ def _enviar_a_cuarentena(cursor, estacion_id, fecha_str, producto, volumen, medi
 
 def render(conn):
     st.markdown("### 📊 Registro Semanal de Ventas (Con Auditoría de Anomalías)")
-    st.write("Captura o actualiza las ventas diarias (de lunes a domingo) para las estaciones asignadas a tu usuario.")
+    st.write("Captura o actualiza las ventas diarias (de lunes a domingo) para las estaciones asignadas al usuario.")
     
     try:
         # 1. Obtener la lista de programadores
