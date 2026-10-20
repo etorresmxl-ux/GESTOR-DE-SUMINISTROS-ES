@@ -38,7 +38,7 @@ def dataframe_a_excel_bytes(df):
 
 def render(conn):
     st.markdown("### 📥 Módulo de Importación Masiva (Excel / CSV)")
-    st.write("Sube tus archivos de Excel (`.xlsx`) o CSV. El sistema corregirá automáticamente formatos de fecha, valores numéricos y convertirá los ceros en nulos (`NULL`).")
+    st.write("Sube tus archivos de Excel (`.xlsx`) o CSV. El sistema validará los rangos y corregirá automáticamente formatos de fecha y valores numéricos.")
     
     tab_inv, tab_ventas = st.tabs(["📦 Inventarios Históricos", "📊 Ventas Históricas"])
     
@@ -104,7 +104,7 @@ def render(conn):
                         st.markdown(f"- {adv}")
 
                 st.write("Vista previa de los datos limpios a importar:")
-                st.dataframe(df_inv, width='stretch', height=250)
+                st.dataframe(df_inv, use_container_width=True, height=250)
 
                 if st.button("🚀 Procesar e Importar Inventarios", key="btn_imp_inv"):
                     cursor = conn.cursor()
@@ -167,8 +167,58 @@ def render(conn):
                     if col in df_ventas.columns:
                         df_ventas[col] = df_ventas[col].apply(limpiar_numero)
 
+                # Consultar los promedios de venta ponderados o históricos por estación y producto
+                cursor = conn.cursor()
+                try:
+                    cursor.execute("SELECT estacion_id, producto, vdp FROM vdp_ponderado_12w;")
+                except Exception:
+                    # Alternativa si la estructura difiere o usa id_estacion
+                    try:
+                        cursor.execute("SELECT id_estacion, producto, vdp FROM vdp_ponderado_12w;")
+                    except Exception:
+                        cursor.execute("SELECT estacion_id, producto, vdp FROM estaciones_detalle;")
+                
+                vdp_dict = {}
+                for row in cursor.fetchall():
+                    est_s = str(row[0]).strip()
+                    prod_s = str(row[1]).strip().lower()
+                    vdp_val = float(row[2]) if row[2] is not None else 0.0
+                    vdp_dict[(est_s, prod_s)] = vdp_val
+                cursor.close()
+
+                # Validación del rango +/- 30% respecto al promedio diario de venta (VDP)
+                advertencias_ventas = []
+                for idx, row in df_ventas.iterrows():
+                    est_id = str(row['estacion_id']).strip()
+                    for prod_key in ['regular', 'premium', 'diesel']:
+                        if prod_key in df_ventas.columns and pd.notna(row[prod_key]):
+                            val_venta = float(row[prod_key])
+                            
+                            # Buscar el VDP correspondiente
+                            vdp_promedio = 0.0
+                            for (c_est, c_prod), c_val in vdp_dict.items():
+                                if c_est == est_id and prod_key in c_prod:
+                                    vdp_promedio = c_val
+                                    break
+                            
+                            if vdp_promedio > 0:
+                                limite_inferior = vdp_promedio * 0.70
+                                limite_superior = vdp_promedio * 1.30
+                                
+                                if val_venta < limite_inferior or val_venta > limite_superior:
+                                    advertencias_ventas.append(
+                                        f"⚠️ **Fila {idx + 2} (Estación {est_id})**: La venta de **{prod_key}** ({val_venta:,.0f} L) "
+                                        f"se desvía más del 30% de su promedio diario habitual ({vdp_promedio:,.0f} L/día)."
+                                    )
+
                 st.info(f"📊 Archivo cargado y sanitizado. Total de registros: {len(df_ventas)}")
-                st.dataframe(df_ventas, width='stretch', height=250)
+                if advertencias_ventas:
+                    st.warning("⚠️ Alertas de desviación detectadas (fuera del rango +/- 30% del promedio):")
+                    for adv in advertencias_ventas:
+                        st.markdown(f"- {adv}")
+
+                st.write("Vista previa de los datos limpios a importar:")
+                st.dataframe(df_ventas, use_container_width=True, height=250)
 
                 if st.button("🚀 Procesar e Importar Ventas", key="btn_imp_ventas"):
                     cursor = conn.cursor()
@@ -199,4 +249,4 @@ def render(conn):
                     cursor.close()
                     st.success(f"¡Se procesaron e importaron {count} registros de ventas exitosamente!")
             except Exception as e:
-                st.error(f"Error al procesar el archivo de ventas: {e}")
+                st.error(f5"Error al procesar el archivo de ventas: {e}")
