@@ -307,18 +307,18 @@ def render(conn):
         # ==========================================
         with tab_gestion:
             st.markdown("#### 📋 Alta, Modificación y Eliminación de Órdenes de Carga")
-            st.write("Crea órdenes independientes (soporta múltiples cargas el mismo día). **Candado activo:** No se permiten fechas de programación pasadas.")
+            st.write("Crea órdenes independientes (soporta múltiples cargas el mismo día y fechas pasadas para captura de comprobantes).")
 
-            # Formulario de alta
+            # Formulario de alta (Reordenado: Fecha -> Producto -> Cantidad)
             with st.form("form_crear_orden_carga", clear_on_submit=True):
                 st.markdown("##### ➕ Registrar Nueva Orden de Carga")
                 c1, c2, c3 = st.columns(3)
                 with c1:
+                    sel_fecha_alta = st.date_input("Fecha de Programación:", value=date.today())
+                with c2:
                     prod_opciones = [p[0] for p in productos_todos if p[1] in productos_disponibles_estacion or capacidades.get(p[1], 0.0) > 0]
                     if not prod_opciones: prod_opciones = ["REGULAR", "PREMIUM", "DIESEL"]
                     sel_prod_alta = st.selectbox("Producto:", prod_opciones)
-                with c2:
-                    sel_fecha_alta = st.date_input("Fecha de Programación:", value=date.today(), min_value=date.today())
                 with c3:
                     sel_vol_alta = st.number_input("Volumen (Litros):", min_value=1, value=None, step=1, placeholder="Ingresa el volumen...")
 
@@ -345,25 +345,25 @@ def render(conn):
                             cursor.close()
                             st.error(f"Error al registrar la orden: {err}")
 
-            # Notificación persistente tras recarga (ubicada exactamente debajo del formulario y antes del calendario)
+            # Notificación persistente tras recarga
             if "mensaje_exito_orden" in st.session_state:
                 st.success(st.session_state["mensaje_exito_orden"])
                 del st.session_state["mensaje_exito_orden"]
 
             st.markdown("---")
-            st.markdown("##### 🔍 Órdenes de Carga Registradas (Vigentes y Futuras)")
+            st.markdown("##### 🔍 Órdenes de Carga Registradas")
             
             try:
                 query_tabla_ordenes = f"""
                     SELECT id AS orden_carga, producto, fecha_programacion, volumen_programado, creado_en
                     FROM programacion_cargas
-                    WHERE id_estacion = '{estacion_id_sel}' AND fecha_programacion >= '{date.today().strftime("%Y-%m-%d")}'
-                    ORDER BY fecha_programacion ASC;
+                    WHERE id_estacion = '{estacion_id_sel}'
+                    ORDER BY fecha_programacion DESC;
                 """
                 df_ordenes = pd.read_sql(query_tabla_ordenes, conn)
 
                 if df_ordenes.empty:
-                    st.info("No hay órdenes de carga activas para esta estación.")
+                    st.info("No hay órdenes de carga registradas para esta estación.")
                 else:
                     calendario, fuera_de_rango = construir_calendario(
                         df_ordenes, {p.upper() for p in productos_disponibles_estacion}, date.today()
@@ -373,7 +373,6 @@ def render(conn):
                         _prod=df_ordenes['producto'].map(_clave_producto),
                         _fecha=pd.to_datetime(df_ordenes['fecha_programacion']).dt.date,
                     )
-                    # La llave cambia cuando cambia el calendario: así la selección se limpia sola tras guardar o eliminar.
                     huella = hashlib.md5("|".join(calendario.to_numpy().ravel()).encode()).hexdigest()[:8]
 
                     st.caption(
@@ -387,10 +386,8 @@ def render(conn):
                             on_select="rerun", selection_mode="single-cell",
                         )
                     except Exception:
-                        # Versión de Streamlit sin selección de celdas: el calendario se ve igual, sin clic.
                         evento = None
                         st.dataframe(estilo_calendario(calendario), width='stretch')
-                        st.caption("Tu versión de Streamlit aún no permite seleccionar celdas; usa el selector de folio.")
 
                     celdas = ((evento.get("selection") or {}).get("cells") or []) if evento is not None else []
                     celda_clave, folios_celda = None, []
@@ -406,8 +403,6 @@ def render(conn):
                     if celda_clave is None:
                         st.session_state.pop("_celda_orden_procesada", None)
                     elif st.session_state.get("_celda_orden_procesada") != celda_clave:
-                        # Solo al hacer clic en una celda nueva se actualiza el formulario;
-                        # si luego eliges otro folio a mano, se respeta tu elección.
                         st.session_state["_celda_orden_procesada"] = celda_clave
                         if folios_celda:
                             st.session_state["folio_sel_orden"] = folios_celda[0]
@@ -460,13 +455,12 @@ def render(conn):
                     with st.form("form_editar_orden"):
                         ce1, ce2, ce3 = st.columns(3)
                         with ce1:
-                            nuevo_vol = st.number_input("Modificar Volumen (L):", value=int(float(row_orden_act['volumen_programado'])), step=1, key=f"ed_vol_{sufijo_form}")
+                            nueva_fecha = st.date_input("Modificar Fecha:", value=pd.to_datetime(row_orden_act['fecha_programacion']).date(), key=f"ed_fecha_{sufijo_form}")
                         with ce2:
-                            fecha_actual_obj = pd.to_datetime(row_orden_act['fecha_programacion']).date()
-                            nueva_fecha = st.date_input("Modificar Fecha:", value=fecha_actual_obj, min_value=date.today(), key=f"ed_fecha_{sufijo_form}")
-                        with ce3:
                             prod_actual = row_orden_act['producto']
                             nuevo_prod = st.selectbox("Modificar Producto:", ["REGULAR", "PREMIUM", "DIESEL"], index=0 if "REGULAR" in prod_actual.upper() else (1 if "PREMIUM" in prod_actual.upper() else 2), key=f"ed_prod_{sufijo_form}")
+                        with ce3:
+                            nuevo_vol = st.number_input("Modificar Volumen (L):", value=int(float(row_orden_act['volumen_programado'])), step=1, key=f"ed_vol_{sufijo_form}")
 
                         submitted_update = st.form_submit_button("💾 Guardar Cambios en la Orden", use_container_width=True)
 
