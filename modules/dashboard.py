@@ -29,17 +29,6 @@ def render(conn):
     hoy = ahora_local.date()
     hoy_str = hoy.strftime("%Y-%m-%d")
 
-    # Indicador de fecha y hora local en el menú lateral (inferior)
-    st.sidebar.markdown("---")
-    st.sidebar.markdown(
-        f"<div style='text-align: center; color: #aaa; font-size: 0.85em; padding: 10px;'>"
-        f"🕒 <b>Reloj del Sistema</b><br>"
-        f"📅 {ahora_local.strftime('%Y-%m-%d')}<br>"
-        f"⏱️ {ahora_local.strftime('%H:%M:%S')} (UTC-7)"
-        f"</div>",
-        unsafe_allow_html=True
-    )
-
     st.markdown("### 📊 Dashboard Operativo - Inventarios, Espacio Disponible y Días de Suministro (D/S)")
     st.write("Resumen general por estación: Inventario teórico/actualizado al día de hoy (con indicador * si es arrastrado), capacidad máxima, cargas del día y Días de Suministro (VDP 12 semanas).")
     
@@ -177,13 +166,13 @@ def render(conn):
             prefijo = "*" if es_teorico else ""
             return f"{prefijo}{litros:,.0f} L", es_teorico
 
-        # Consultar cargas programadas para el DÍA DE HOY de forma segura
+        # Consultar cargas programadas para el DÍA DE HOY de forma segura y acumulada
         cargas_hoy = {} # {(estacion_id, producto_key): volumen_total_programado_hoy}
         try:
             query_cargas = f"""
                 SELECT id_estacion, producto, volumen_programado
                 FROM programacion_cargas
-                WHERE CAST(fecha_programacion AS TEXT) LIKE '{hoy_str}%';
+                WHERE fecha_programacion = '{hoy_str}';
             """
             df_cargas = pd.read_sql(query_cargas, conn)
             if not df_cargas.empty:
@@ -207,4 +196,129 @@ def render(conn):
 
         # Calcular espacio disponible
         df['espacio_r'] = df.apply(lambda r: max(0, r['cap_regular'] - r['reg_litros_calc']) if r['cap_regular'] > 0 else np.nan, axis=1)
-        df['espacio_p'] = df.
+        df['espacio_p'] = df.apply(lambda r: max(0, r['cap_premium'] - r['pre_litros_calc']) if r['cap_premium'] > 0 else np.nan, axis=1)
+        df['espacio_d'] = df.apply(lambda r: max(0, r['cap_diesel'] - r['die_litros_calc']) if r['cap_diesel'] > 0 else np.nan, axis=1)
+
+        # ==========================================
+        # 1. CENTRO DE ALERTAS PRIORIZADAS
+        # ==========================================
+        st.markdown("### 🚨 Centro de Alertas y Prioridades de Abastecimiento")
+        
+        alertas = []
+        for _, r in df.iterrows():
+            est_id = str(r['id_estacion']).strip()
+            f_inv = r['fecha_inventario']
+            
+            productos = [
+                ('Regular', r['ds_r'], r['reg_litros_calc'], r['cap_regular'], r['espacio_r'], r['vdp_reg'], 'regular'), 
+                ('Premium', r['ds_p'], r['pre_litros_calc'], r['cap_premium'], r['espacio_p'], r['vdp_pre'], 'premium'), 
+                ('Diesel', r['ds_d'], r['die_litros_calc'], r['cap_diesel'], r['espacio_d'], r['vdp_die'], 'diesel')
+            ]
+            
+            for prod, ds, litros, cap, espacio, vdp, p_key in productos:
+                if cap > 0 and pd.notna(ds):
+                    if ds < 2.0: # Menor a 2 días (Crítico o Advertencia)
+                        prioridad = 1 if ds < 1.0 else 2
+                        nivel = "🔴 CRÍTICO (< 1 Día)" if ds < 1.0 else "🟡 ADVERTENCIA (< 2 Días)"
+                        
+                        str_inv_actual, _ = formato_inv(litros, f_inv)
+                        vol_carga_hoy = cargas_hoy.get((est_id, p_key), 0.0)
+                        
+                        if vol_carga_hoy > 0:
+                            litros_post = litros + vol_carga_hoy - vdp
+                            ds_post = round(litros_post / vdp, 1) if vdp > 0 else ds
+                            programa_status = f"🚛 Sí ({vol_carga_hoy:,.0f} L) ➔ Post: *{litros_post:,.0f} L ({ds_post:.1f} d)"
+                        else:
+                            programa_status = "❌ Sin Carga Hoy"
+
+                        alertas.append({
+                            "prioridad": prioridad, 
+                            "nivel": nivel,
+                            "estacion": f"{r['id_estacion']} - {r['estacion']}",
+                            "plaza": str(r['plaza']),
+                            "producto": prod,
+                            "litros_val": str_inv_actual,
+                            "vta_hoy": f"{vdp:,.0f} L",
+                            "ds": ds,
+                            "espacio": espacio,
+                            "programa": programa_status
+                        })
+
+        if not alertas:
+            st.success("✅ ¡Excelente noticia! No hay estaciones con niveles críticos o de advertencia en este momento.")
+        else:
+            alertas_ordenadas = sorted(alertas, key=lambda x: (x['prioridad'], x['ds']))
+            df_alertas = pd.DataFrame(alertas_ordenadas)
+            
+            tabla_alertas_vis = pd.DataFrame({
+                "Estatus": df_alertas['nivel'],
+                "Estación": df_alertas['estacion'],
+                "Plaza": df_alertas['plaza'],
+                "Producto": df_alertas['producto'],
+                "Inventario Actual": df_alertas['litros_val'],
+                "Venta Proyectada Hoy": df_alertas['vta_hoy'],
+                "D/S Actual": df_alertas['ds'].apply(lambda x: f"{x:.1f} días"),
+                "Programa Hoy / Post-Entrega": df_alertas['programa']
+            })
+            
+            # --- FUNCIÓN DE ESTILO PARA LA CELDA DE PRODUCTO ---
+            def estilizar_producto(val):
+                v_lower = str(val).strip().lower()
+                if 'regular' in v_lower:
+                    return 'background-color: #27ae60; color: white; font-weight: bold; text-align: center;'  # Verde
+                elif 'premium' in v_lower:
+                    return 'background-color: #e67e22; color: white; font-weight: bold; text-align: center;'  # Naranja
+                elif 'diesel' in v_lower:
+                    return 'background-color: #7f8c8d; color: white; font-weight: bold; text-align: center;'  # Gris
+                return ''
+
+            tabla_estilizada = tabla_alertas_vis.style.map(
+                estilizar_producto, subset=['Producto']
+            )
+
+            st.dataframe(tabla_estilizada, width='stretch', height=300, hide_index=True)
+
+        st.markdown("---")
+
+        # ==========================================
+        # 2. TABLA GENERAL DE INVENTARIOS COMBINADA (INV + D/S)
+        # ==========================================
+        st.markdown("### 📋 Detalle General de Inventarios y Suministro")
+
+        def calcular_semaforo(r):
+            ds_vals = [r['ds_r'], r['ds_p'], r['ds_d']]
+            ds_validos = [v for v in ds_vals if pd.notna(v)]
+            if not ds_validos:
+                return "🟢"
+            min_ds = min(ds_validos)
+            if min_ds < 1.0:
+                return "🔴"
+            elif min_ds < 2.0:
+                return "🟡"
+            else:
+                return "🟢"
+
+        df['semaforo'] = df.apply(calcular_semaforo, axis=1)
+
+        def formatear_celda_general(litros, ds, cap, fecha_inv):
+            if cap <= 0 or pd.isna(ds):
+                return "N/A"
+            txt_inv, _ = formato_inv(litros, fecha_inv)
+            return f"{txt_inv} ({ds:.1f} d)"
+
+        tabla_vis = pd.DataFrame({
+            "Semáforo": df['semaforo'],
+            "ID": df['id_estacion'].astype(str),
+            "TAD": df['tad'].astype(str),
+            "Plaza": df['plaza'].astype(str),
+            "Estación": df['estacion'].astype(str),
+            
+            "REGULAR (Inv / D/S)": df.apply(lambda r: formatear_celda_general(r['reg_litros_calc'], r['ds_r'], r['cap_regular'], r['fecha_inventario']), axis=1),
+            "PREMIUM (Inv / D/S)": df.apply(lambda r: formatear_celda_general(r['pre_litros_calc'], r['ds_p'], r['cap_premium'], r['fecha_inventario']), axis=1),
+            "DIESEL (Inv / D/S)": df.apply(lambda r: formatear_celda_general(r['die_litros_calc'], r['ds_d'], r['cap_diesel'], r['fecha_inventario']), axis=1),
+        })
+
+        st.dataframe(tabla_vis, width='stretch', height=450, hide_index=True)
+        
+    except Exception as e:
+        st.error(f"Error al generar el dashboard operativo: {e}")
