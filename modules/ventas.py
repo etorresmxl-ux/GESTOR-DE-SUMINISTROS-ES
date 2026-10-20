@@ -9,10 +9,15 @@ def evaluar_y_gestionar_venta(conn, estacion_id, fecha_str, producto, volumen, m
     de la misma estación y el mismo día de la semana (últimas 12 semanas).
     """
     cursor = conn.cursor()
+    prod_col = producto.lower().strip()
+    if prod_col not in ['regular', 'premium', 'diesel']:
+        cursor.close()
+        return "IGNORADO"
+
     try:
         # 1. Consultar el histórico reciente para ese mismo día de la semana (DOW)
         query_stats = f"""
-            SELECT {producto} AS volumen 
+            SELECT "{prod_col}" AS volumen 
             FROM ventas_historico
             WHERE estacion_id = %s
               AND EXTRACT(DOW FROM fecha) = EXTRACT(DOW FROM TIMESTAMP %s)
@@ -23,13 +28,13 @@ def evaluar_y_gestionar_venta(conn, estacion_id, fecha_str, producto, volumen, m
         
         # Si no hay suficiente historia (< 3 registros), dejamos pasar el registro por seguridad
         if len(df_hist) < 3 or df_hist['volumen'].dropna().empty:
-            _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen)
+            _insertar_venta_oficial(cursor, estacion_id, fecha_str, prod_col, volumen)
             cursor.close()
             return "APROBADO_SIN_HISTORIA"
 
         volúmenes = df_hist['volumen'].dropna().astype(float).values
         if len(volúmenes) < 3:
-            _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen)
+            _insertar_venta_oficial(cursor, estacion_id, fecha_str, prod_col, volumen)
             cursor.close()
             return "APROBADO_SIN_HISTORIA"
 
@@ -42,18 +47,19 @@ def evaluar_y_gestionar_venta(conn, estacion_id, fecha_str, producto, volumen, m
 
         if z_score > UBRAL_Z:
             # ¡Anomalía detectada! Mandar a Cuarentena (ventas_anomalias)
-            _enviar_a_cuarentena(cursor, estacion_id, fecha_str, producto, volumen, media, desv_est, z_score, metodo_carga)
+            _enviar_a_cuarentena(cursor, estacion_id, fecha_str, prod_col, volumen, media, desv_est, z_score, metodo_carga)
             cursor.close()
             return "ANOMALIA"
         else:
             # Venta normal, va directo al histórico oficial
-            _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen)
+            _insertar_venta_oficial(cursor, estacion_id, fecha_str, prod_col, volumen)
             cursor.close()
             return "NORMAL"
 
     except Exception as e:
+        conn.rollback() # Limpia la transacción abortada para permitir siguientes consultas en Supabase
         cursor.close()
-        print(f"Error al evaluar anomalía para {estacion_id} - {producto}: {e}")
+        print(f"Error al evaluar anomalía para {estacion_id} - {prod_col}: {e}")
         raise e
 
 def _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen):
