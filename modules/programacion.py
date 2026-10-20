@@ -24,21 +24,24 @@ def _etiqueta_fecha(f):
     return f"{DIAS_SEMANA[f.weekday()]} {f.day:02d}-{MESES[f.month - 1]}"
 
 
-def construir_calendario(df_ordenes, productos_estacion, hoy, dias_minimos=14, dias_maximos=45):
+def construir_calendario(df_ordenes, productos_estacion, hoy):
     """
     Calendario de cargas registradas: una fila por producto, una columna por día,
     con el volumen programado (si hay varias cargas el mismo día, se suman).
-    Muestra al menos `dias_minimos` días desde hoy y se amplía hasta la última orden
-    (máximo `dias_maximos`). Devuelve (tabla, ordenes_fuera_de_rango).
+    Muestra estrictamente las 2 semanas completas (de lunes a domingo): 
+    la semana actual y la semana siguiente. Devuelve (tabla, ordenes_fuera_de_rango).
     """
     o = df_ordenes.copy()
     o["fecha"] = pd.to_datetime(o["fecha_programacion"]).dt.date
     o["prod"] = o["producto"].map(_clave_producto)
     o["vol"] = pd.to_numeric(o["volumen_programado"], errors="coerce").fillna(0.0)
 
-    dias = min(max(dias_minimos, (o["fecha"].max() - hoy).days + 1), dias_maximos)
-    fechas = [hoy + timedelta(days=i) for i in range(dias)]
-    fuera = int((o["fecha"] > fechas[-1]).sum())
+    # Calcular el lunes de la semana actual
+    lunes_actual = hoy - timedelta(days=hoy.weekday())
+    # Rango fijo de 14 días: desde el lunes de esta semana hasta el domingo de la próxima semana
+    fechas = [lunes_actual + timedelta(days=i) for i in range(14)]
+    
+    fuera = int((o["fecha"] > fechas[-1]).sum()) + int((o["fecha"] < fechas[0]).sum())
 
     con_ordenes = set(o["prod"])
     productos = [p for p in PRODUCTOS_ORDEN if p in productos_estacion or p in con_ordenes] or PRODUCTOS_ORDEN
@@ -368,7 +371,11 @@ def render(conn):
                     calendario, fuera_de_rango = construir_calendario(
                         df_ordenes, {p.upper() for p in productos_disponibles_estacion}, date.today()
                     )
-                    fecha_por_columna = {c: date.today() + timedelta(days=i) for i, c in enumerate(calendario.columns)}
+                    
+                    # Calcular el diccionario de fechas por columna basado en el nuevo calendario de lunes a domingo
+                    lunes_actual = date.today() - timedelta(days=date.today().weekday())
+                    fecha_por_columna = {c: lunes_actual + timedelta(days=i) for i, c in enumerate(calendario.columns)}
+                    
                     ordenes_idx = df_ordenes.assign(
                         _prod=df_ordenes['producto'].map(_clave_producto),
                         _fecha=pd.to_datetime(df_ordenes['fecha_programacion']).dt.date,
@@ -376,7 +383,7 @@ def render(conn):
                     huella = hashlib.md5("|".join(calendario.to_numpy().ravel()).encode()).hexdigest()[:8]
 
                     st.caption(
-                        "Volumen programado por día y producto (si hay varias cargas el mismo día, se suman). "
+                        "Volumen programado por semana completa (de lunes a domingo, incluyendo semana actual y siguiente). "
                         "👆 Haz clic en una celda con carga para modificarla o eliminarla."
                     )
                     try:
@@ -416,7 +423,7 @@ def render(conn):
                             lista = ", ".join(f"#{f}" for f in folios_celda)
                             st.info(f"✏️ Hay {len(folios_celda)} órdenes en esa celda ({lista}). Elige cuál modificar en el selector de folio (abajo).")
                     if fuera_de_rango:
-                        st.caption(f"Hay {fuera_de_rango} orden(es) más allá del rango mostrado; consúltalas en el detalle por folio.")
+                        st.caption(f"Hay {fuera_de_rango} orden(es) más allá del rango de las 2 semanas mostradas; consúltalas en el detalle por folio.")
                     with st.expander("Ver detalle por folio"):
                         st.dataframe(df_ordenes, width='stretch', hide_index=True)
 
