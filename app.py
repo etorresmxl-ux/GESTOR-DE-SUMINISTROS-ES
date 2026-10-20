@@ -1,7 +1,7 @@
 import streamlit as st
 from datetime import datetime, timezone, timedelta
 from database import init_connection
-from modules import inventario, ventas, importador, dashboard, programacion, administrador_cargas
+from modules import inventario, ventas, importador, dashboard, programacion, administrador_cargas, anomalias
 
 st.set_page_config(
     page_title="Gestión de Suministro - Gasolineras",
@@ -23,7 +23,8 @@ menu = st.sidebar.radio(
         "📝 Registro de Inventarios",
         "📊 Registro de Ventas",
         "🚛 Administrador de Cargas",
-        "📥 Importar Masivos (CSV)"
+        "📥 Importar Masivos (CSV)",
+        "🔍 Auditoría de Anomalías"
     ],
     label_visibility="collapsed"
 )
@@ -68,6 +69,8 @@ if conn:
         administrador_cargas.render(conn)
     elif menu == "📥 Importar Masivos (CSV)":
         importador.render(conn)
+    elif menu == "🔍 Auditoría de Anomalías":
+        anomalias.render(conn)
     
     conn.close()
 else:
