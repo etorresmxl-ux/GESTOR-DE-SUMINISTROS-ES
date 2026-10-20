@@ -12,7 +12,7 @@ def evaluar_y_gestionar_venta(conn, estacion_id, fecha_str, producto, volumen, m
     cursor = conn.cursor()
     try:
         # 1. Consultar el histórico reciente para ese mismo día de la semana (DOW)
-        query_stats = f"""
+        query_stats = """
             SELECT volumen 
             FROM ventas_historico
             WHERE estacion_id = %s
@@ -26,6 +26,7 @@ def evaluar_y_gestionar_venta(conn, estacion_id, fecha_str, producto, volumen, m
         # Si no hay suficiente historia (< 3 registros), dejamos pasar el registro por seguridad
         if len(df_hist) < 3:
             _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen)
+            cursor.close()
             return "APROBADO_SIN_HISTORIA"
 
         volúmenes = df_hist['volumen'].astype(float).values
@@ -39,15 +40,18 @@ def evaluar_y_gestionar_venta(conn, estacion_id, fecha_str, producto, volumen, m
         if z_score > UBRAL_Z:
             # ¡Anomalía detectada! Mandar a Cuarentena (ventas_anomalias)
             _enviar_a_cuarentena(cursor, estacion_id, fecha_str, producto, volumen, media, desv_est, z_score, metodo_carga)
+            cursor.close()
             return "ANOMALIA"
         else:
             # Venta normal, va directo al histórico oficial
             _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen)
+            cursor.close()
             return "NORMAL"
 
     except Exception as e:
+        cursor.close()
         print(f"Error al evaluar anomalía para {estacion_id} - {producto}: {e}")
-        return "ERROR"
+        raise e
 
 def _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen):
     sql_upsert = """
@@ -82,8 +86,6 @@ def render(conn):
 
         # 2. Calcular la semana en curso (Lunes a Domingo)
         hoy = date.today()
-        inicio_semana_actual = hoy - timedelta(days=hoy.weekday())
-        fin_semana_actual = inicio_semana_actual + timedelta(days=6)
 
         # Controles superiores
         col1, col2 = st.columns(2)
@@ -127,21 +129,6 @@ def render(conn):
             "Diesel": [0] * 7
         })
 
-        # Consultar ventas existentes en ese rango de fechas para esta estación
-        query_ventas = f"""
-            SELECT fecha, producto, volumen 
-            FROM ventas_historico 
-            WHERE estacion_id = '{estacion_id}' 
-              AND fecha BETWEEN '{lunes_semana}' AND '{domingo_semana}';
-        """
-        # Nota: Si tu tabla guarda los productos en columnas separadas (regular, premium, diesel), 
-        # adaptamos la lectura. A continuación manejamos la estructura estándar de columnas o formato vertical.
-        try:
-            df_existentes = pd.read_sql(query_ventas, conn)
-            # Si tu tabla actual utiliza columnas separadas, puedes usar esta alternativa:
-        except Exception:
-            pass
-
         # Consulta robusta adaptada a columnas separadas (regular, premium, diesel)
         query_ventas_cols = f"""
             SELECT fecha, regular, premium, diesel 
@@ -182,7 +169,6 @@ def render(conn):
             
             if submitted:
                 try:
-                    cursor = conn.cursor()
                     normales_count = 0
                     anomalias_count = 0
                     
@@ -202,12 +188,12 @@ def render(conn):
                                     normales_count += 1
 
                     conn.commit()
-                    cursor.close()
-                    
                     st.success(f"¡Proceso completado! Registros guardados con éxito: {normales_count}.")
                     if anomalias_count > 0:
                         st.warning(f"⚠️ Se detectaron y enviaron **{anomalias_count} registros a Cuarentena (`ventas_anomalias`)** por superar el umbral estadístico de desviación.")
                 except Exception as e:
+                    # IMPORTANTE: Revertir la transacción si ocurre cualquier error para evitar bloqueos
+                    conn.rollback()
                     st.error(f"Error al guardar las ventas en la base de datos: {e}")
 
     except Exception as e:
