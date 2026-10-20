@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import re
+import numpy as np
 
 def limpiar_fecha(val):
     if pd.isna(val) or str(val).strip() == "":
@@ -14,8 +15,8 @@ def limpiar_fecha(val):
     except Exception:
         return None
 
-def limpiar_numero(val):
-    """Limpia el número, elimina caracteres extra y convierte valores vacíos en None (NULL)."""
+def limpiar_numero_preservando_ceros(val):
+    """Limpia el número permitiendo ceros y descartando vacíos."""
     if pd.isna(val):
         return None
     val_str = str(val).strip()
@@ -36,9 +37,74 @@ def dataframe_a_excel_bytes(df):
         df.to_excel(writer, index=False, sheet_name='Plantilla')
     return output.getvalue()
 
+def evaluar_y_gestionar_venta(conn, estacion_id, fecha_str, producto, volumen, metodo_carga):
+    """
+    Evalúa una venta usando Z-Score basado en el mismo día de la semana (últimas 12 semanas).
+    Si |Z| > 2.5, se manda a cuarentena (ventas_anomalias).
+    Si es normal, se inserta directamente a ventas_historico.
+    """
+    cursor = conn.cursor()
+    try:
+        # 1. Consultar el histórico reciente para ese mismo día de la semana (DOW)
+        query_stats = f"""
+            SELECT volumen 
+            FROM ventas_historico
+            WHERE estacion_id = %s
+              AND LOWER(producto) = LOWER(%s)
+              AND EXTRACT(DOW FROM fecha) = EXTRACT(DOW FROM TIMESTAMP %s)
+              AND fecha >= CURRENT_DATE - INTERVAL '12 weeks'
+              AND ignorar_en_promedio = FALSE;
+        """
+        df_hist = pd.read_sql(query_stats, conn, params=(estacion_id, producto, fecha_str))
+        
+        # Si no hay suficiente historia (< 3 registros), dejamos pasar el registro por seguridad
+        if len(df_hist) < 3:
+            _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen)
+            return "APROBADO_SIN_HISTORIA"
+
+        volúmenes = df_hist['volumen'].astype(float).values
+        media = np.mean(volúmenes)
+        desv_est = np.std(volúmenes, ddof=1) # Desviación estándar muestral
+
+        # 2. Calcular Z-Score
+        z_score = float(abs(volumen - media) / desv_est) if desv_est > 0 else 0.0
+        UMBRAL_Z = 2.5 # Ocurre en menos del 1% de los casos por azar
+
+        if z_score > UBRAL_Z:
+            # ¡Anomalía detectada! Mandar a Cuarentena (ventas_anomalias)
+            _enviar_a_cuarentena(cursor, estacion_id, fecha_str, producto, volumen, media, desv_est, z_score, metodo_carga)
+            return "ANOMALIA"
+        else:
+            # Venta normal, va directo al histórico oficial
+            _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen)
+            return "NORMAL"
+
+    except Exception as e:
+        print(f"Error al evaluar anomalía para {estacion_id} - {producto}: {e}")
+        return "ERROR"
+
+def _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen):
+    sql_upsert = """
+        INSERT INTO ventas_historico (estacion_id, fecha, producto, volumen, ignorar_en_promedio)
+        VALUES (%s, %s, %s, %s, FALSE)
+        ON CONFLICT (estacion_id, fecha) 
+        DO UPDATE SET 
+            volumen = COALESCE(EXCLUDED.volumen, ventas_historico.volumen);
+    """
+    # Nota: Si tu tabla maneja columnas separadas (regular, premium, diesel), ajusta el upsert a tu esquema relacional actual.
+    cursor.execute(sql_upsert, (estacion_id, fecha_str, producto, volumen))
+
+def _enviar_a_cuarentena(cursor, estacion_id, fecha_str, producto, volumen, media, desv_est, z_score, metodo_carga):
+    sql_cuarentena = """
+        INSERT INTO ventas_anomalias 
+        (estacion_id, fecha, producto, volumen_capturado, media_historica, desviacion_estandar, z_score, metodo_carga, estatus)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'PENDIENTE');
+    """
+    cursor.execute(sql_cuarentena, (estacion_id, fecha_str, producto, volumen, media, desv_est, z_score, metodo_carga))
+
 def render(conn):
     st.markdown("### 📥 Módulo de Importación Masiva (Excel / CSV)")
-    st.write("Sube tus archivos de Excel (`.xlsx`) o CSV. El sistema validará los rangos y corregirá automáticamente formatos de fecha y valores numéricos.")
+    st.write("Sube tus archivos de Excel (`.xlsx`) o CSV. El sistema validará automáticamente las anomalías estadísticas mediante Z-Score.")
     
     tab_inv, tab_ventas = st.tabs(["📦 Inventarios Históricos", "📊 Ventas Históricas"])
     
@@ -47,7 +113,6 @@ def render(conn):
     # ==========================================
     with tab_inv:
         st.subheader("Carga de Inventarios Históricos")
-        
         df_plantilla_inv = pd.DataFrame(columns=["estacion_id", "fecha", "regular", "premium", "diesel"])
         st.download_button(
             label="📥 Descargar Plantilla Excel (Inventarios)",
@@ -57,53 +122,17 @@ def render(conn):
             key="descargar_plantilla_inv_xlsx"
         )
         st.markdown("---")
-
-        file_inv = st.file_uploader("Selecciona el archivo (Excel o CSV) de Inventarios:", type=["xlsx", "xls", "csv"], key="up_inv_file")
+        file_inv = st.file_uploader("Selecciona el archivo de Inventarios:", type=["xlsx", "xls", "csv"], key="up_inv_file")
         
         if file_inv is not None:
             try:
-                if file_inv.name.endswith('.csv'):
-                    df_inv = pd.read_csv(file_inv)
-                else:
-                    df_inv = pd.read_excel(file_inv)
-                
+                df_inv = pd.read_csv(file_inv) if file_inv.name.endswith('.csv') else pd.read_excel(file_inv)
                 df_inv['fecha'] = df_inv['fecha'].apply(limpiar_fecha)
                 for col in ['regular', 'premium', 'diesel']:
                     if col in df_inv.columns:
-                        df_inv[col] = df_inv[col].apply(limpiar_numero)
+                        df_inv[col] = df_inv[col].apply(limpiar_numero_preservando_ceros)
 
-                cursor = conn.cursor()
-                cursor.execute("SELECT id_estacion, producto, capacidad_maxima FROM estaciones_detalle;")
-                cap_dict = {}
-                for row in cursor.fetchall():
-                    cap_dict[(str(row[0]), str(row[1]).strip().lower())] = float(row[2]) if row[2] is not None else 0.0
-                cursor.close()
-
-                advertencias = []
-                for idx, row in df_inv.iterrows():
-                    est_id = str(row['estacion_id'])
-                    for prod_key in ['regular', 'premium', 'diesel']:
-                        if prod_key in df_inv.columns and pd.notna(row[prod_key]):
-                            val = row[prod_key]
-                            cap_max = 0.0
-                            for (c_est, c_prod), c_val in cap_dict.items():
-                                if c_est == est_id and prod_key in c_prod:
-                                    cap_max = c_val
-                                    break
-                            if cap_max > 0 and val > cap_max:
-                                df_inv.at[idx, prod_key] = None
-                                advertencias.append(
-                                    f"⚠️ **Fila {idx + 2} (Estación {est_id})**: El valor de **{prod_key}** ({val:,.0f} L) "
-                                    f"supera la capacidad máxima ({cap_max:,.0f} L). Se omitió automáticamente."
-                                )
-
-                st.info(f"📊 Archivo cargado y sanitizado correctamente. Total de registros: {len(df_inv)}")
-                if advertencias:
-                    st.warning("Valores omitidos por exceder capacidad:")
-                    for adv in advertencias:
-                        st.markdown(f"- {adv}")
-
-                st.write("Vista previa de los datos limpios a importar:")
+                st.info(f"📊 Archivo cargado. Total de registros: {len(df_inv)}")
                 st.dataframe(df_inv, use_container_width=True, height=250)
 
                 if st.button("🚀 Procesar e Importar Inventarios", key="btn_imp_inv"):
@@ -112,24 +141,19 @@ def render(conn):
                         INSERT INTO inventarios_historico (estacion_id, fecha, regular, premium, diesel)
                         VALUES (%s, %s, %s, %s, %s)
                         ON CONFLICT (estacion_id, fecha) 
-                        DO UPDATE SET 
-                            regular = COALESCE(EXCLUDED.regular, inventarios_historico.regular),
-                            premium = COALESCE(EXCLUDED.premium, inventarios_historico.premium),
-                            diesel = COALESCE(EXCLUDED.diesel, inventarios_historico.diesel);
+                        DO UPDATE SET regular = COALESCE(EXCLUDED.regular, inventarios_historico.regular),
+                                      premium = COALESCE(EXCLUDED.premium, inventarios_historico.premium),
+                                      diesel = COALESCE(EXCLUDED.diesel, inventarios_historico.diesel);
                     """
                     count = 0
                     for _, row in df_inv.iterrows():
                         if pd.notna(row['fecha']) and str(row['estacion_id']).strip() != "":
-                            reg_val = float(row['regular']) if 'regular' in df_inv.columns and pd.notna(row['regular']) else None
-                            pre_val = float(row['premium']) if 'premium' in df_inv.columns and pd.notna(row['premium']) else None
-                            die_val = float(row['diesel']) if 'diesel' in df_inv.columns and pd.notna(row['diesel']) else None
-
                             cursor.execute(sql_upsert_inv, (
                                 str(row['estacion_id']).strip(),
                                 str(row['fecha']),
-                                reg_val,
-                                pre_val,
-                                die_val
+                                float(row['regular']) if 'regular' in df_inv.columns and pd.notna(row['regular']) else None,
+                                float(row['premium']) if 'premium' in df_inv.columns and pd.notna(row['premium']) else None,
+                                float(row['diesel']) if 'diesel' in df_inv.columns and pd.notna(row['diesel']) else None
                             ))
                             count += 1
                     conn.commit()
@@ -139,11 +163,10 @@ def render(conn):
                 st.error(f"Error al procesar el archivo: {e}")
 
     # ==========================================
-    # 2. VENTAS HISTÓRICAS
+    # 2. VENTAS HISTÓRICAS (Con Motor Z-Score y Cuarentena)
     # ==========================================
     with tab_ventas:
-        st.subheader("Carga de Ventas Históricas")
-        
+        st.subheader("Carga de Ventas Históricas (Auditoría Inteligente)")
         df_plantilla_ventas = pd.DataFrame(columns=["estacion_id", "fecha", "regular", "premium", "diesel"])
         st.download_button(
             label="📥 Descargar Plantilla Excel (Ventas)",
@@ -153,100 +176,50 @@ def render(conn):
             key="descargar_plantilla_ventas_xlsx"
         )
         st.markdown("---")
-
-        file_ventas = st.file_uploader("Selecciona el archivo (Excel o CSV) de Ventas:", type=["xlsx", "xls", "csv"], key="up_ventas_file")
+        file_ventas = st.file_uploader("Selecciona el archivo de Ventas:", type=["xlsx", "xls", "csv"], key="up_ventas_file")
         
         if file_ventas is not None:
             try:
-                if file_ventas.name.endswith('.csv'):
-                    df_ventas = pd.read_csv(file_ventas)
-                else:
-                    df_ventas = pd.read_excel(file_ventas)
-
+                df_ventas = pd.read_csv(file_ventas) if file_ventas.name.endswith('.csv') else pd.read_excel(file_ventas)
                 df_ventas['fecha'] = df_ventas['fecha'].apply(limpiar_fecha)
                 for col in ['regular', 'premium', 'diesel']:
                     if col in df_ventas.columns:
-                        df_ventas[col] = df_ventas[col].apply(limpiar_numero)
-
-                # Consultar los promedios de venta por estación y producto
-                cursor = conn.cursor()
-                try:
-                    cursor.execute("SELECT estacion_id, producto, vdp FROM vdp_ponderado_12w;")
-                except Exception:
-                    try:
-                        cursor.execute("SELECT id_estacion, producto, vdp FROM vdp_ponderado_12w;")
-                    except Exception:
-                        cursor.execute("SELECT estacion_id, producto, vdp FROM estaciones_detalle;")
-                
-                vdp_dict = {}
-                for row in cursor.fetchall():
-                    est_s = str(row[0]).strip()
-                    prod_s = str(row[1]).strip().lower()
-                    vdp_val = float(row[2]) if row[2] is not None else 0.0
-                    vdp_dict[(est_s, prod_s)] = vdp_val
-                cursor.close()
-
-                # Validación del rango +/- 30% respecto al VDP
-                advertencias_ventas = []
-                for idx, row in df_ventas.iterrows():
-                    est_id = str(row['estacion_id']).strip()
-                    for prod_key in ['regular', 'premium', 'diesel']:
-                        if prod_key in df_ventas.columns and pd.notna(row[prod_key]):
-                            val_venta = float(row[prod_key])
-                            
-                            vdp_promedio = 0.0
-                            for (c_est, c_prod), c_val in vdp_dict.items():
-                                if c_est == est_id and prod_key in c_prod:
-                                    vdp_promedio = c_val
-                                    break
-                            
-                            if vdp_promedio > 0:
-                                limite_inferior = vdp_promedio * 0.70
-                                limite_superior = vdp_promedio * 1.30
-                                
-                                if val_venta < limite_inferior or val_venta > limite_superior:
-                                    advertencias_ventas.append(
-                                        f"⚠️ **Fila {idx + 2} (Estación {est_id})**: La venta de **{prod_key}** ({val_venta:,.0f} L) "
-                                        f"se desvía más del 30% de su promedio diario habitual ({vdp_promedio:,.0f} L/día)."
-                                    )
+                        df_ventas[col] = df_ventas[col].apply(limpiar_numero_preservando_ceros)
 
                 st.info(f"📊 Archivo cargado y sanitizado. Total de registros: {len(df_ventas)}")
-                if advertencias_ventas:
-                    st.warning("⚠️ Alertas de desviación detectadas (fuera del rango +/- 30% del promedio):")
-                    for adv in advertencias_ventas:
-                        st.markdown(f"- {adv}")
-
-                st.write("Vista previa de los datos limpios a importar:")
                 st.dataframe(df_ventas, use_container_width=True, height=250)
 
-                if st.button("🚀 Procesar e Importar Ventas", key="btn_imp_ventas"):
+                if st.button("🚀 Procesar e Importar Ventas con Validación Z-Score", key="btn_imp_ventas"):
                     cursor = conn.cursor()
-                    sql_upsert_ventas = """
-                        INSERT INTO ventas_historico (estacion_id, fecha, regular, premium, diesel)
-                        VALUES (%s, %s, %s, %s, %s)
-                        ON CONFLICT (estacion_id, fecha) 
-                        DO UPDATE SET 
-                            regular = COALESCE(EXCLUDED.regular, ventas_historico.regular),
-                            premium = COALESCE(EXCLUDED.premium, ventas_historico.premium),
-                            diesel = COALESCE(EXCLUDED.diesel, ventas_historico.diesel);
-                    """
-                    count = 0
+                    normales_count = 0
+                    anomalias_count = 0
+                    
                     for _, row in df_ventas.iterrows():
-                        if pd.notna(row['fecha']) and str(row['estacion_id']).strip() != "":
-                            reg_val = float(row['regular']) if 'regular' in df_ventas.columns and pd.notna(row['regular']) else None
-                            pre_val = float(row['premium']) if 'premium' in df_ventas.columns and pd.notna(row['premium']) else None
-                            die_val = float(row['diesel']) if 'diesel' in df_ventas.columns and pd.notna(row['diesel']) else None
+                        fecha_v = row['fecha']
+                        est_id = str(row['estacion_id']).strip()
 
-                            cursor.execute(sql_upsert_ventas, (
-                                str(row['estacion_id']).strip(),
-                                str(row['fecha']),
-                                reg_val,
-                                pre_val,
-                                die_val
-                            ))
-                            count += 1
+                        if pd.notna(fecha_v) and est_id != "":
+                            for prod in ['regular', 'premium', 'diesel']:
+                                if prod in df_ventas.columns and pd.notna(row[prod]):
+                                    vol = float(row[prod])
+                                    
+                                    # Evaluamos cada producto de forma independiente con Z-Score
+                                    resultado = evaluar_y_gestionar_venta(
+                                        conn, est_id, fecha_v, prod, vol, "Importador Masivo"
+                                    )
+                                    
+                                    if resultado == "ANOMALIA":
+                                        anomalias_count += 1
+                                    else:
+                                        normales_count += 1
+
                     conn.commit()
                     cursor.close()
-                    st.success(f"¡Se procesaron e importaron {count} registros de ventas exitosamente!")
+                    
+                    st.success(f"¡Proceso finalizado! Registros normales importados: {normales_count}.")
+                    if anomalias_count > 0:
+                        st.warning(f"⚠️ Se detectaron y enviaron **{anomalias_count} registros a Cuarentena (ventas_anomalias)** por superar el umbral estadístico de desviación.")
+                    else:
+                        st.info("✨ No se detectaron anomalías estadísticas en este lote.")
             except Exception as e:
                 st.error(f"Error al procesar el archivo de ventas: {e}")
