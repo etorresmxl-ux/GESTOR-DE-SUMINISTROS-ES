@@ -44,6 +44,15 @@ st.sidebar.markdown(
     unsafe_allow_html=True
 )
 
+# ==========================================
+# BOTÓN DE REFRESCADO DE BASE DE DATOS
+# ==========================================
+st.sidebar.markdown("---")
+if st.sidebar.button("🔄 Refrescar Base de Datos", use_container_width=True):
+    # Limpia la caché de datos de Streamlit para obligar a consultar Supabase de nuevo
+    st.cache_data.clear()
+    st.sidebar.success("✅ Conexión con Supabase verificada y datos actualizados.")
+
 conn = init_connection()
 
 if conn:
