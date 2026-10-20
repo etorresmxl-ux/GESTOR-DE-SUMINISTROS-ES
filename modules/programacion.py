@@ -2,6 +2,7 @@ import hashlib
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
+from database import init_connection
 
 DIAS_SEMANA = ['lun.', 'mar.', 'mié.', 'jue.', 'vie.', 'sáb.', 'dom.']
 MESES = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.']
@@ -77,17 +78,25 @@ def confirmar_eliminacion(conn, orden_id, detalles_str):
     c_si, c_no = st.columns(2)
     with c_si:
         if st.button("Confirmar y Eliminar", type="primary", use_container_width=True):
-            cursor = conn.cursor()
+            active_conn = conn
             try:
+                # Verificar si la conexión está cerrada y reabrirla si es necesario
+                if active_conn is None or (hasattr(active_conn, "closed") and active_conn.closed != 0):
+                    active_conn = init_connection()
+                
+                cursor = active_conn.cursor()
                 q_del = f"DELETE FROM programacion_cargas WHERE id = {orden_id};"
                 cursor.execute(q_del)
-                conn.commit()
+                active_conn.commit()
                 cursor.close()
                 st.session_state["mensaje_exito_orden"] = f"🗑️ Orden de Carga #{orden_id} eliminada del sistema."
                 st.rerun()
             except Exception as e_del:
-                conn.rollback()
-                cursor.close()
+                try:
+                    if active_conn and hasattr(active_conn, "rollback"):
+                        active_conn.rollback()
+                except Exception:
+                    pass
                 st.error(f"Error al eliminar: {e_del}")
     with c_no:
         if st.button("Cancelar", use_container_width=True):
@@ -312,7 +321,7 @@ def render(conn):
             st.markdown("#### 📋 Alta, Modificación y Eliminación de Órdenes de Carga")
             st.write("Crea órdenes independientes (soporta múltiples cargas el mismo día y fechas pasadas para captura de comprobantes).")
 
-            # Formulario de alta (Reordenado: Fecha -> Producto -> Cantidad)
+            # Formulario de alta (Reordenado: Fecha -> Producto -> Cantidad sin decimales y vacío por defecto)
             with st.form("form_crear_orden_carga", clear_on_submit=True):
                 st.markdown("##### ➕ Registrar Nueva Orden de Carga")
                 c1, c2, c3 = st.columns(3)
@@ -323,7 +332,7 @@ def render(conn):
                     if not prod_opciones: prod_opciones = ["REGULAR", "PREMIUM", "DIESEL"]
                     sel_prod_alta = st.selectbox("Producto:", prod_opciones)
                 with c3:
-                    sel_vol_alta = st.number_input("Volumen (Litros):", min_value=1, value=None, step=1, placeholder="Ingresa el volumen...")
+                    sel_vol_alta = st.number_input("Volumen (Litros):", min_value=1, value=None, step=1, format="%d", placeholder="Ingresa el volumen...")
 
                 submitted_alta = st.form_submit_button("🚀 Generar Orden de Carga")
                 if submitted_alta:
@@ -452,8 +461,9 @@ def render(conn):
                     
                     row_orden_act = df_ordenes[df_ordenes['orden_carga'] == sel_orden_id].iloc[0]
                     
+                    # Botón de eliminar con estilo secundario y separado visualmente
                     with col_btn_del:
-                        if st.button("🗑️ Eliminar Orden", type="primary", use_container_width=True, key=f"btn_del_{sel_orden_id}"):
+                        if st.button("🗑️ Eliminar Orden", type="secondary", use_container_width=True, key=f"btn_del_{sel_orden_id}"):
                             detalles_orden = etiquetas_ordenes.get(sel_orden_id, f"Folio #{sel_orden_id}")
                             confirmar_eliminacion(conn, sel_orden_id, detalles_orden)
 
@@ -467,7 +477,7 @@ def render(conn):
                             prod_actual = row_orden_act['producto']
                             nuevo_prod = st.selectbox("Modificar Producto:", ["REGULAR", "PREMIUM", "DIESEL"], index=0 if "REGULAR" in prod_actual.upper() else (1 if "PREMIUM" in prod_actual.upper() else 2), key=f"ed_prod_{sufijo_form}")
                         with ce3:
-                            nuevo_vol = st.number_input("Modificar Volumen (L):", value=int(float(row_orden_act['volumen_programado'])), step=1, key=f"ed_vol_{sufijo_form}")
+                            nuevo_vol = st.number_input("Modificar Volumen (L):", value=int(float(row_orden_act['volumen_programado'])), step=1, format="%d", key=f"ed_vol_{sufijo_form}")
 
                         submitted_update = st.form_submit_button("💾 Guardar Cambios en la Orden", use_container_width=True)
 
