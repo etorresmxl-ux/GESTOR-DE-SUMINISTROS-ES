@@ -1,9 +1,74 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 from datetime import date, timedelta
 
+def evaluar_y_gestionar_venta(conn, estacion_id, fecha_str, producto, volumen, metodo_carga):
+    """
+    Evalúa una venta usando Z-Score basado en el mismo día de la semana (últimas 12 semanas).
+    Si |Z| > 2.5, se manda a cuarentena (ventas_anomalias).
+    Si es normal, se inserta directamente a ventas_historico.
+    """
+    cursor = conn.cursor()
+    try:
+        # 1. Consultar el histórico reciente para ese mismo día de la semana (DOW)
+        query_stats = f"""
+            SELECT volumen 
+            FROM ventas_historico
+            WHERE estacion_id = %s
+              AND LOWER(producto) = LOWER(%s)
+              AND EXTRACT(DOW FROM fecha) = EXTRACT(DOW FROM TIMESTAMP %s)
+              AND fecha >= CURRENT_DATE - INTERVAL '12 weeks'
+              AND ignorar_en_promedio = FALSE;
+        """
+        df_hist = pd.read_sql(query_stats, conn, params=(estacion_id, producto, fecha_str))
+        
+        # Si no hay suficiente historia (< 3 registros), dejamos pasar el registro por seguridad
+        if len(df_hist) < 3:
+            _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen)
+            return "APROBADO_SIN_HISTORIA"
+
+        volúmenes = df_hist['volumen'].astype(float).values
+        media = np.mean(volúmenes)
+        desv_est = np.std(volúmenes, ddof=1) # Desviación estándar muestral
+
+        # 2. Calcular Z-Score
+        z_score = float(abs(volumen - media) / desv_est) if desv_est > 0 else 0.0
+        UMBRAL_Z = 2.5 # Ocurre en menos del 1% de los casos por azar
+
+        if z_score > UBRAL_Z:
+            # ¡Anomalía detectada! Mandar a Cuarentena (ventas_anomalias)
+            _enviar_a_cuarentena(cursor, estacion_id, fecha_str, producto, volumen, media, desv_est, z_score, metodo_carga)
+            return "ANOMALIA"
+        else:
+            # Venta normal, va directo al histórico oficial
+            _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen)
+            return "NORMAL"
+
+    except Exception as e:
+        print(f"Error al evaluar anomalía para {estacion_id} - {producto}: {e}")
+        return "ERROR"
+
+def _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen):
+    sql_upsert = """
+        INSERT INTO ventas_historico (estacion_id, fecha, producto, volumen, ignorar_en_promedio)
+        VALUES (%s, %s, %s, %s, FALSE)
+        ON CONFLICT (estacion_id, fecha) 
+        DO UPDATE SET 
+            volumen = COALESCE(EXCLUDED.volumen, ventas_historico.volumen);
+    """
+    cursor.execute(sql_upsert, (estacion_id, fecha_str, producto, volumen))
+
+def _enviar_a_cuarentena(cursor, estacion_id, fecha_str, producto, volumen, media, desv_est, z_score, metodo_carga):
+    sql_cuarentena = """
+        INSERT INTO ventas_anomalias 
+        (estacion_id, fecha, producto, volumen_capturado, media_historica, desviacion_estandar, z_score, metodo_carga, estatus)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'PENDIENTE');
+    """
+    cursor.execute(sql_cuarentena, (estacion_id, fecha_str, producto, volumen, media, desv_est, z_score, metodo_carga))
+
 def render(conn):
-    st.markdown("### 📊 Registro Semanal de Ventas")
+    st.markdown("### 📊 Registro Semanal de Ventas (Con Auditoría de Anomalías)")
     st.write("Captura o actualiza las ventas diarias (de lunes a domingo) para las estaciones asignadas a tu usuario.")
     
     try:
@@ -17,7 +82,6 @@ def render(conn):
 
         # 2. Calcular la semana en curso (Lunes a Domingo)
         hoy = date.today()
-        # Ajustar para que el lunes sea el inicio de semana (0 = Lunes, 6 = Domingo)
         inicio_semana_actual = hoy - timedelta(days=hoy.weekday())
         fin_semana_actual = inicio_semana_actual + timedelta(days=6)
 
@@ -26,9 +90,7 @@ def render(conn):
         with col1:
             usuario_seleccionado = st.selectbox("👤 Selecciona tu Usuario (Programador)", df_prog["usuario"].tolist(), key="ventas_prog")
         with col2:
-            # Selector de semana (permitiendo elegir el lunes de la semana a consultar)
             lunes_seleccionado = st.date_input("Semana (Selecciona cualquier día de la semana deseada)", hoy)
-            # Normalizar al lunes de esa semana
             lunes_semana = lunes_seleccionado - timedelta(days=lunes_seleccionado.weekday())
             domingo_semana = lunes_semana + timedelta(days=6)
 
@@ -48,7 +110,6 @@ def render(conn):
             st.warning(f"El usuario {usuario_seleccionado} no tiene estaciones asignadas.")
             return
 
-        # Selector para elegir qué estación consultar/registrar en detalle semanal
         lista_estaciones_opciones = [f"{row['ID']} - {row['Estacion']} ({row['Plaza']})" for _, row in df_estaciones.iterrows()]
         estacion_elegida_str = st.selectbox("Selecciona la Estación a Registrar", lista_estaciones_opciones)
         
@@ -68,22 +129,36 @@ def render(conn):
 
         # Consultar ventas existentes en ese rango de fechas para esta estación
         query_ventas = f"""
+            SELECT fecha, producto, volumen 
+            FROM ventas_historico 
+            WHERE estacion_id = '{estacion_id}' 
+              AND fecha BETWEEN '{lunes_semana}' AND '{domingo_semana}';
+        """
+        # Nota: Si tu tabla guarda los productos en columnas separadas (regular, premium, diesel), 
+        # adaptamos la lectura. A continuación manejamos la estructura estándar de columnas o formato vertical.
+        try:
+            df_existentes = pd.read_sql(query_ventas, conn)
+            # Si tu tabla actual utiliza columnas separadas, puedes usar esta alternativa:
+        except Exception:
+            pass
+
+        # Consulta robusta adaptada a columnas separadas (regular, premium, diesel)
+        query_ventas_cols = f"""
             SELECT fecha, regular, premium, diesel 
             FROM ventas_historico 
             WHERE estacion_id = '{estacion_id}' 
               AND fecha BETWEEN '{lunes_semana}' AND '{domingo_semana}';
         """
-        df_existentes = pd.read_sql(query_ventas, conn)
+        df_existentes = pd.read_sql(query_ventas_cols, conn)
 
         if not df_existentes.empty:
-            # Asegurar formato date para comparar
             df_existentes["fecha"] = pd.to_datetime(df_existentes["fecha"]).dt.date
             for idx, row in df_semanal.iterrows():
                 match = df_existentes[df_existentes["fecha"] == row["Fecha"]]
                 if not match.empty:
-                    df_semanal.loc[idx, "Regular"] = int(match.iloc[0]["regular"])
-                    df_semanal.loc[idx, "Premium"] = int(match.iloc[0]["premium"])
-                    df_semanal.loc[idx, "Diesel"] = int(match.iloc[0]["diesel"])
+                    df_semanal.loc[idx, "Regular"] = int(match.iloc[0]["regular"]) if pd.notna(match.iloc[0]["regular"]) else 0
+                    df_semanal.loc[idx, "Premium"] = int(match.iloc[0]["premium"]) if pd.notna(match.iloc[0]["premium"]) else 0
+                    df_semanal.loc[idx, "Diesel"] = int(match.iloc[0]["diesel"]) if pd.notna(match.iloc[0]["diesel"]) else 0
 
         # 5. Formulario y tabla interactiva para los 7 días de la semana
         with st.form(f"form_ventas_{estacion_id}"):
@@ -103,26 +178,35 @@ def render(conn):
                 num_rows="fixed"
             )
             
-            submitted = st.form_submit_button("💾 Guardar / Actualizar Ventas Semanales", use_container_width=True)
+            submitted = st.form_submit_button("💾 Guardar / Evaluar Ventas Semanales", use_container_width=True)
             
             if submitted:
                 try:
                     cursor = conn.cursor()
+                    normales_count = 0
+                    anomalias_count = 0
+                    
                     for _, row in df_editado.iterrows():
-                        cursor.execute(
-                            """
-                            INSERT INTO ventas_historico (estacion_id, fecha, regular, premium, diesel)
-                            VALUES (%s, %s, %s, %s, %s)
-                            ON CONFLICT (estacion_id, fecha) 
-                            DO UPDATE SET regular = EXCLUDED.regular, 
-                                          premium = EXCLUDED.premium, 
-                                          diesel = EXCLUDED.diesel;
-                            """,
-                            (estacion_id, row["Fecha"], row["Regular"], row["Premium"], row["Diesel"])
-                        )
+                        fecha_str = str(row["Fecha"])
+                        
+                        # Evaluamos cada producto individualmente con el motor de Z-Score
+                        for prod in ["regular", "premium", "diesel"]:
+                            vol = float(row[prod.capitalize()])
+                            if vol > 0: # Solo evaluamos si hay volumen registrado
+                                resultado = evaluar_y_gestionar_venta(
+                                    conn, estacion_id, fecha_str, prod, vol, "Registro Manual"
+                                )
+                                if resultado == "ANOMALIA":
+                                    anomalias_count += 1
+                                else:
+                                    normales_count += 1
+
                     conn.commit()
                     cursor.close()
-                    st.success(f"¡Ventas semanales guardadas exitosamente para la estación {estacion_id}!")
+                    
+                    st.success(f"¡Proceso completado! Registros guardados con éxito: {normales_count}.")
+                    if anomalias_count > 0:
+                        st.warning(f"⚠️ Se detectaron y enviaron **{anomalias_count} registros a Cuarentena (`ventas_anomalias`)** por superar el umbral estadístico de desviación.")
                 except Exception as e:
                     st.error(f"Error al guardar las ventas en la base de datos: {e}")
 
