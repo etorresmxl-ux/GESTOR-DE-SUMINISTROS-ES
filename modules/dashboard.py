@@ -261,15 +261,15 @@ def render(conn):
                 "Programa Hoy / Post-Entrega": df_alertas['programa']
             })
             
-            # --- FUNCIÓN DE ESTILO PARA LA CELDA DE PRODUCTO ---
+            # --- FUNCIÓN DE ESTILO PARA LA CELDA DE PRODUCTO (SOLO TEXTO) ---
             def estilizar_producto(val):
                 v_lower = str(val).strip().lower()
                 if 'regular' in v_lower:
-                    return 'background-color: #27ae60; color: white; font-weight: bold; text-align: center;'  # Verde
+                    return 'color: #27ae60; font-weight: bold; text-align: center;'  # Texto verde
                 elif 'premium' in v_lower:
-                    return 'background-color: #e67e22; color: white; font-weight: bold; text-align: center;'  # Naranja
+                    return 'color: #e67e22; font-weight: bold; text-align: center;'  # Texto naranja
                 elif 'diesel' in v_lower:
-                    return 'background-color: #7f8c8d; color: white; font-weight: bold; text-align: center;'  # Gris
+                    return 'color: #7f8c8d; font-weight: bold; text-align: center;'  # Texto gris
                 return ''
 
             tabla_estilizada = tabla_alertas_vis.style.map(
