@@ -39,30 +39,32 @@ def dataframe_a_excel_bytes(df):
 
 def evaluar_y_gestionar_venta(conn, estacion_id, fecha_str, producto, volumen, metodo_carga):
     """
-    Evalúa una venta usando Z-Score basado en el mismo día de la semana (últimas 12 semanas).
-    Si |Z| > 2.5, se manda a cuarentena (ventas_anomalias).
-    Si es normal, se inserta directamente a ventas_historico.
+    Evalúa una venta usando Z-Score basado en las columnas horizontales (regular, premium, diesel)
+    de la misma estación y el mismo día de la semana (últimas 12 semanas).
     """
     cursor = conn.cursor()
     try:
-        # 1. Consultar el histórico reciente para ese mismo día de la semana (DOW)
+        # 1. Consultar el histórico usando la columna específica del producto
         query_stats = f"""
-            SELECT volumen 
+            SELECT {producto} AS volumen 
             FROM ventas_historico
             WHERE estacion_id = %s
-              AND LOWER(producto) = LOWER(%s)
               AND EXTRACT(DOW FROM fecha) = EXTRACT(DOW FROM TIMESTAMP %s)
               AND fecha >= CURRENT_DATE - INTERVAL '12 weeks'
               AND ignorar_en_promedio = FALSE;
         """
-        df_hist = pd.read_sql(query_stats, conn, params=(estacion_id, producto, fecha_str))
+        df_hist = pd.read_sql(query_stats, conn, params=(estacion_id, fecha_str))
         
         # Si no hay suficiente historia (< 3 registros), dejamos pasar el registro por seguridad
-        if len(df_hist) < 3:
+        if len(df_hist) < 3 or df_hist['volumen'].dropna().empty:
             _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen)
             return "APROBADO_SIN_HISTORIA"
 
-        volúmenes = df_hist['volumen'].astype(float).values
+        volúmenes = df_hist['volumen'].dropna().astype(float).values
+        if len(volúmenes) < 3:
+            _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen)
+            return "APROBADO_SIN_HISTORIA"
+
         media = np.mean(volúmenes)
         desv_est = np.std(volúmenes, ddof=1) # Desviación estándar muestral
 
@@ -84,15 +86,18 @@ def evaluar_y_gestionar_venta(conn, estacion_id, fecha_str, producto, volumen, m
         return "ERROR"
 
 def _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen):
-    sql_upsert = """
-        INSERT INTO ventas_historico (estacion_id, fecha, producto, volumen, ignorar_en_promedio)
-        VALUES (%s, %s, %s, %s, FALSE)
+    prod_col = producto.lower().strip()
+    if prod_col not in ['regular', 'premium', 'diesel']:
+        return
+
+    sql_upsert = f"""
+        INSERT INTO ventas_historico (estacion_id, fecha, {prod_col}, ignorar_en_promedio)
+        VALUES (%s, %s, %s, FALSE)
         ON CONFLICT (estacion_id, fecha) 
         DO UPDATE SET 
-            volumen = COALESCE(EXCLUDED.volumen, ventas_historico.volumen);
+            {prod_col} = COALESCE(EXCLUDED.{prod_col}, ventas_historico.{prod_col});
     """
-    # Nota: Si tu tabla maneja columnas separadas (regular, premium, diesel), ajusta el upsert a tu esquema relacional actual.
-    cursor.execute(sql_upsert, (estacion_id, fecha_str, producto, volumen))
+    cursor.execute(sql_upsert, (estacion_id, fecha_str, volumen))
 
 def _enviar_a_cuarentena(cursor, estacion_id, fecha_str, producto, volumen, media, desv_est, z_score, metodo_carga):
     sql_cuarentena = """
