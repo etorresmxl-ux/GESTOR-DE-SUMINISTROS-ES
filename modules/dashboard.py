@@ -41,7 +41,7 @@ def render(conn):
       " día y Días de Suministro (VDP Ponderada)."
   )
 
-  # Consulta utilizando el nuevo esquema normalizado y la vista de VDP ponderada
+  # Consulta utilizando la vista v_vdp_analisis y el nuevo esquema normalizado
   query = """
         WITH ultimo_inventario AS (
             SELECT 
@@ -53,15 +53,6 @@ def render(conn):
                 ROW_NUMBER() OVER(PARTITION BY id_estacion ORDER BY fecha DESC) as rn
             FROM inventarios
             GROUP BY id_estacion, fecha
-        ),
-        capacidades_productos AS (
-            SELECT 
-                id_estacion,
-                SUM(CASE WHEN producto ILIKE '%regular%' OR producto ILIKE '%magna%' THEN capacidad_maxima ELSE 0 END) as cap_regular,
-                SUM(CASE WHEN producto ILIKE '%premium%' THEN capacidad_maxima ELSE 0 END) as cap_premium,
-                SUM(CASE WHEN producto ILIKE '%diesel%' THEN capacidad_maxima ELSE 0 END) as cap_diesel
-            FROM estaciones_detalle
-            GROUP BY id_estacion
         ),
         info_base AS (
             SELECT DISTINCT 
@@ -85,9 +76,10 @@ def render(conn):
             ib.tad,
             ib.plaza,
             ib.estacion,
-            COALESCE(cp.cap_regular, 0) as cap_regular,
-            COALESCE(cp.cap_premium, 0) as cap_premium,
-            COALESCE(cp.cap_diesel, 0) as cap_diesel,
+            -- Asignación temporal de capacidades estándar mientras se configura el detalle de tanques
+            50000 as cap_regular,
+            30000 as cap_premium,
+            30000 as cap_diesel,
             COALESCE(ui.regular, 0) as reg_litros,
             COALESCE(ui.premium, 0) as pre_litros,
             COALESCE(ui.diesel, 0) as die_litros,
@@ -97,7 +89,6 @@ def render(conn):
             COALESCE(vp.vdp_die, 0) as vdp_die
         FROM info_base ib
         LEFT JOIN ultimo_inventario ui ON ib.id_estacion = ui.id_estacion AND ui.rn = 1
-        LEFT JOIN capacidades_productos cp ON ib.id_estacion = cp.id_estacion
         LEFT JOIN vdp_resumen vp ON ib.id_estacion = vp.id_estacion
         ORDER BY ib.id_estacion;
     """
@@ -109,7 +100,7 @@ def render(conn):
       st.warning("No hay datos suficientes para generar el resumen.")
       return
 
-    # 1. Consultar descargas reales desde bitacora_descargas
+    # 1. Consultar descargas reales de forma segura
     descargas_reales = {}
     try:
       df_bit_hist = pd.read_sql("SELECT * FROM bitacora_descargas;", conn)
@@ -151,7 +142,7 @@ def render(conn):
       except:
         pass
 
-    # 2. Ajustar el inventario de cada estación
+    # 2. Ajustar el inventario descontando ventas y sumando descargas
     inventarios_actualizados_reg = []
     inventarios_actualizados_pre = []
     inventarios_actualizados_die = []
@@ -215,7 +206,7 @@ def render(conn):
       prefijo = "*" if es_teorico else ""
       return f"{prefijo}{litros:,.0f} L", es_teorico
 
-    # Consultar cargas programadas para hoy
+    # Consultar cargas programadas para HOY
     cargas_hoy = {}
     try:
       query_cargas = f"""
