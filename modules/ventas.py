@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -15,9 +16,121 @@ def evaluar_y_gestionar_venta(
   if prod_col not in ["regular", "premium", "diesel"]:
     cursor.close()
     return "IGNORADO"
-  # Lógica de evaluación y retorno (ej. NORMAL o ANOMALIA)
-  cursor.close()
-  return "NORMAL"
+
+  try:
+    # Obtener el día de la semana de la fecha ingresada (0 = Lunes, 6 = Domingo)
+    dt_obj = pd.to_datetime(fecha_str)
+    dia_semana = dt_obj.dayofweek
+
+    # Consultar datos históricos para la misma estación y el mismo día de la semana
+    query_hist = f"""
+        SELECT fecha, {prod_col} 
+        FROM ventas_historico 
+        WHERE estacion_id = %s 
+          AND EXTRACT(DOW FROM fecha) = %s 
+          AND fecha < %s 
+          AND ignorar_en_promedio = FALSE
+        ORDER BY fecha DESC
+        LIMIT 12;
+    """
+    cursor.execute(query_hist, (estacion_id, dia_semana, fecha_str))
+    filas = cursor.fetchall()
+
+    # Extraer valores numéricos válidos
+    valores = [float(row[1]) for row in filas if row[1] is not None]
+
+    # Si no hay suficientes datos históricos, se acepta la venta directamente
+    if len(valores) < 3:
+      _insertar_venta_oficial(cursor, estacion_id, fecha_str, prod_col, volumen)
+      cursor.close()
+      return "NORMAL"
+
+    media = np.mean(valores)
+    desv_est = np.std(valores)
+
+    # Si la desviación estándar es cero, se compara directamente con la media
+    if desv_est == 0:
+      if volumen == media:
+        _insertar_venta_oficial(
+            cursor, estacion_id, fecha_str, prod_col, volumen
+        )
+        cursor.close()
+        return "NORMAL"
+      else:
+        z_score = 99.9  # Desviación alta respecto a una media constante
+    else:
+      z_score = abs((volumen - media) / desv_est)
+
+    # Evaluar contra el umbral Z global
+    if z_score <= UMBRAL_Z:
+      _insertar_venta_oficial(
+          cursor, estacion_id, fecha_str, prod_col, volumen
+      )
+      cursor.close()
+      return "NORMAL"
+    else:
+      _enviar_a_cuarentena(
+          cursor,
+          estacion_id,
+          fecha_str,
+          prod_col,
+          volumen,
+          float(media),
+          float(desv_est),
+          float(z_score),
+          metodo_carga,
+      )
+      cursor.close()
+      return "ANOMALIA"
+
+  except Exception as e:
+    cursor.close()
+    raise e
+
+
+def _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen):
+  prod_col = producto.lower().strip()
+  if prod_col not in ["regular", "premium", "diesel"]:
+    return
+
+  sql_upsert = f"""
+        INSERT INTO ventas_historico (estacion_id, fecha, {prod_col}, ignorar_en_promedio)
+        VALUES (%s, %s, %s, FALSE)
+        ON CONFLICT (estacion_id, fecha) 
+        DO UPDATE SET 
+            {prod_col} = COALESCE(EXCLUDED.{prod_col}, ventas_historico.{prod_col});
+    """
+  cursor.execute(sql_upsert, (estacion_id, fecha_str, volumen))
+
+
+def _enviar_a_cuarentena(
+    cursor,
+    estacion_id,
+    fecha_str,
+    producto,
+    volumen,
+    media,
+    desv_est,
+    z_score,
+    metodo_carga,
+):
+  sql_cuarentena = """
+        INSERT INTO ventas_anomalias (estacion_id, fecha, producto, volumen_capturado, media_historica, desviacion_estandar, z_score, metodo_carga, estatus)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'PENDIENTE');
+    """
+  cursor.execute(
+      sql_cuarentena,
+      (
+          estacion_id,
+          fecha_str,
+          producto,
+          volumen,
+          media,
+          desv_est,
+          z_score,
+          metodo_carga,
+      ),
+  )
 
 
 def render(conn):
@@ -30,10 +143,10 @@ def render(conn):
   )
 
   try:
-    # 1. Obtener la lista de programadores
+    # 1. Obtener la lista de programadores corregida a 'estaciones_detalle' y '"user"'[cite: 16]
     query_prog = (
-        "SELECT DISTINCT usuario FROM estaciones WHERE usuario IS NOT NULL"
-        " ORDER BY usuario;"
+        'SELECT DISTINCT "user" AS usuario FROM estaciones_detalle WHERE "user"'
+        " IS NOT NULL ORDER BY usuario;"
     )
     df_prog = pd.read_sql(query_prog, conn)
 
@@ -67,12 +180,12 @@ def render(conn):
     )
     st.markdown("---")
 
-    # 3. Obtener estaciones del programador
+    # 3. Obtener estaciones del programador desde 'estaciones_detalle'[cite: 16]
     query_est = f"""
-        SELECT id AS "ID", plaza AS "Plaza", nombre AS "Estacion"
-        FROM estaciones
-        WHERE usuario = '{usuario_seleccionado}'
-        ORDER BY plaza, id;
+        SELECT DISTINCT id_estacion AS "ID", plaza AS "Plaza", nombre AS "Estacion"
+        FROM estaciones_detalle
+        WHERE "user" = '{usuario_seleccionado}'
+        ORDER BY plaza, id_estacion;
     """
     df_estaciones = pd.read_sql(query_est, conn)
 
