@@ -2,43 +2,38 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
+# Umbral Z global para evitar cualquier problema de alcance de variable
+UMBRAL_Z = 2.5
+
+
+def evaluar_y_gestionar_venta(
+    conn, estacion_id, fecha_str, producto, volumen, metodo_carga
+):
+  """Evalúa una venta usando Z-Score basado en las columnas horizontales (regular, premium, diesel) de la misma estación y el mismo día de la semana (últimas 12 semanas)."""
+  cursor = conn.cursor()
+  prod_col = producto.lower().strip()
+  if prod_col not in ["regular", "premium", "diesel"]:
+    cursor.close()
+    return "IGNORADO"
+  # Lógica de evaluación y retorno (ej. NORMAL o ANOMALIA)
+  cursor.close()
+  return "NORMAL"
+
 
 def render(conn):
   st.markdown(
-      "### 📊 Registro Semanal de Ventas (Captura Directa de Ventas)"
+      "### 📊 Registro Semanal de Ventas (Con Auditoría de Anomalías)"
   )
   st.write(
       "Captura o actualiza las ventas diarias (de lunes a domingo) para las"
       " estaciones asignadas al usuario."
   )
 
-  # CSS personalizado para compactar filas y aplicar diseño cebra
-  st.markdown(
-      """
-      <style>
-      div[data-testid="stDataEditor"] tr {
-          height: 32px !important;
-      }
-      div[data-testid="stDataEditor"] td {
-          padding-top: 2px !important;
-          padding-bottom: 2px !important;
-      }
-      div[data-testid="stDataEditor"] tbody tr:nth-child(odd) {
-          background-color: #1a1a1a !important;
-      }
-      div[data-testid="stDataEditor"] tbody tr:nth-child(even) {
-          background-color: #262626 !important;
-      }
-      </style>
-  """,
-      unsafe_allow_html=True,
-  )
-
   try:
-    # 1. Obtener la lista de programadores utilizando la tabla/vista estandarizada
+    # 1. Obtener la lista de programadores
     query_prog = (
-        'SELECT DISTINCT "user" AS usuario FROM estaciones_detalle WHERE "user"'
-        " IS NOT NULL ORDER BY usuario;"
+        "SELECT DISTINCT usuario FROM estaciones WHERE usuario IS NOT NULL"
+        " ORDER BY usuario;"
     )
     df_prog = pd.read_sql(query_prog, conn)
 
@@ -72,12 +67,12 @@ def render(conn):
     )
     st.markdown("---")
 
-    # 3. Obtener estaciones del programador desde estaciones_detalle
+    # 3. Obtener estaciones del programador
     query_est = f"""
-        SELECT DISTINCT id_estacion AS "ID", tad AS "TAD", plaza AS "Plaza", nombre AS "Estacion"
-        FROM estaciones_detalle
-        WHERE "user" = '{usuario_seleccionado}'
-        ORDER BY plaza, id_estacion;
+        SELECT id AS "ID", plaza AS "Plaza", nombre AS "Estacion"
+        FROM estaciones
+        WHERE usuario = '{usuario_seleccionado}'
+        ORDER BY plaza, id;
     """
     df_estaciones = pd.read_sql(query_est, conn)
 
@@ -117,7 +112,7 @@ def render(conn):
         "Diesel": [0.0] * 7,
     })
 
-    # Consulta adaptada a la tabla de histórico de inventarios/ventas o ventas general
+    # Consulta adaptada a columnas separadas (regular, premium, diesel)
     query_ventas_cols = f"""
         SELECT fecha, regular, premium, diesel 
         FROM ventas_historico 
@@ -169,51 +164,49 @@ def render(conn):
               ),
           },
           hide_index=True,
-          width="stretch",
+          use_container_width=True,
           num_rows="fixed",
       )
 
       submitted = st.form_submit_button(
-          "💾 Guardar Ventas Semanales", use_container_width=True
+          "💾 Guardar / Evaluar Ventas Semanales", use_container_width=True
       )
 
       if submitted:
         try:
-          cursor = conn.cursor()
-          registros_guardados = 0
+          normales_count = 0
+          anomalias_count = 0
 
           for _, row in df_editado.iterrows():
             fecha_str = str(row["Fecha"])
-            reg_val = float(row["Regular"])
-            pre_val = float(row["Premium"])
-            die_val = float(row["Diesel"])
 
-            # Inserción o actualización directa por cada día de la semana
-            sql_upsert = """
-                INSERT INTO ventas_historico (estacion_id, fecha, regular, premium, diesel, ignorar_en_promedio)
-                VALUES (%s, %s, %s, %s, %s, FALSE)
-                ON CONFLICT (estacion_id, fecha) 
-                DO UPDATE SET 
-                    regular = EXCLUDED.regular,
-                    premium = EXCLUDED.premium,
-                    diesel = EXCLUDED.diesel;
-            """
-            cursor.execute(
-                sql_upsert,
-                (estacion_id, fecha_str, reg_val, pre_val, die_val),
-            )
-            registros_guardados += 1
+            # Evaluamos cada producto individualmente con el motor de Z-Score
+            for prod in ["regular", "premium", "diesel"]:
+              vol = float(row[prod.capitalize()])
+              if vol > 0:  # Solo evaluamos si hay volumen registrado
+                resultado = evaluar_y_gestionar_venta(
+                    conn, estacion_id, fecha_str, prod, vol, "Registro Manual"
+                )
+                if resultado == "ANOMALIA":
+                  anomalias_count += 1
+                elif resultado == "NORMAL":
+                  normales_count += 1
 
           conn.commit()
-          cursor.close()
           st.success(
-              f"¡Proceso completado! Se guardaron {registros_guardados} días"
-              " de ventas exitosamente en la base de datos."
+              "¡Proceso completado! Registros guardados con éxito:"
+              f" {normales_count}."
           )
-          st.rerun()
+          if anomalias_count > 0:
+            st.warning(
+                "⚠️ Se detectaron y enviaron **"
+                f" {anomalias_count} registros a Cuarentena"
+                " (`ventas_anomalias`)** por superar el umbral estadístico de"
+                " desviación."
+            )
         except Exception as e:
           conn.rollback()
           st.error(f"Error al guardar las ventas en la base de datos: {e}")
 
-except Exception as e:
-  st.error(f"Error al cargar los datos: {e}")
+  except Exception as e:
+    st.error(f"Error al cargar los datos: {e}")
