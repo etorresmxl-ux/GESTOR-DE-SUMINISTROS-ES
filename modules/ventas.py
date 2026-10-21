@@ -70,7 +70,7 @@ def render(conn):
         else:
             st.caption("ℹ️ Esta estación **no cuenta con registro de Diesel**, por lo que se omite esa columna.")
 
-        # 4. Generar la estructura de la matriz (Lunes a Domingo = 7 filas)
+        # 4. Generar la estructura de la matriz con enteros (0) de Lunes a Domingo
         fechas_semana = [lunes_semana + timedelta(days=i) for i in range(7)]
         nombres_dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
@@ -79,11 +79,11 @@ def render(conn):
             "Día": nombres_dias
         }
         for p in productos_validos:
-            data_matriz[nombres_prod_map[p]] = [0.0] * 7
+            data_matriz[nombres_prod_map[p]] = [0] * 7
 
         df_semanal = pd.DataFrame(data_matriz)
 
-        # 5. Validar y precargar registros existentes si ya fueron guardados previamente
+        # 5. Validar y precargar registros existentes si ya fueron guardados previamente como enteros
         query_ventas_previas = f"""
             SELECT fecha, producto, volumen 
             FROM ventas 
@@ -106,9 +106,9 @@ def render(conn):
                     if not match.empty:
                         val = match.iloc[0]["volumen"]
                         if pd.notna(val):
-                            df_semanal.loc[idx, nombres_prod_map[p]] = float(val)
+                            df_semanal.loc[idx, nombres_prod_map[p]] = int(float(val))
 
-        # 6. Tabla Matriz Interactiva dentro de un formulario
+        # 6. Tabla Matriz Interactiva dentro de un formulario con formato entero (%,d)
         st.markdown(f"#### Matriz de Ventas Semanales")
 
         column_config = {
@@ -119,7 +119,7 @@ def render(conn):
         for p in productos_validos:
             col_nombre = nombres_prod_map[p]
             column_config[col_nombre] = st.column_config.NumberColumn(
-                f"{col_nombre} (Lts)", min_value=0.0, format="%,.2f", step=100.0
+                f"{col_nombre} (Lts)", min_value=0, format="%,d", step=100
             )
 
         with st.form(f"form_ventas_semanal_{estacion_id}"):
