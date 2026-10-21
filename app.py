@@ -18,16 +18,14 @@ st.sidebar.markdown("## ⛽ Gestión de Suministro")
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Navegación")
 
-# Importar todos los módulos activos existentes en la carpeta 'modules'
-from modules import dashboard, ventas, inventarios, importador
+# Importar solo los módulos activos existentes en la carpeta 'modules'
+from modules import dashboard, ventas
 
 menu = st.sidebar.radio(
     "Selecciona un módulo:",
     [
         "Dashboard Operativo",
         "Registro de Ventas",
-        "Registro de Inventarios",
-        "Importador Masivo",
     ],
 )
 
@@ -40,16 +38,12 @@ st.sidebar.write(f"⏰ {ahora_local.strftime('%H:%M:%S (UTC-7)')}")
 
 st.sidebar.markdown("---")
 if st.sidebar.button("🔄 Refrescar Base de Datos", use_container_width=True):
-    st.cache_data.clear()
-    st.success("¡Caché refrescada con éxito!")
-    st.rerun()
+  st.cache_data.clear()
+  st.success("¡Caché refrescada con éxito!")
+  st.rerun()
 
 # --- ENRUTAMIENTO DE MÓDULOS ---
 if menu == "Dashboard Operativo":
-    dashboard.render(conn)
+  dashboard.render(conn)
 elif menu == "Registro de Ventas":
-    ventas.render(conn)
-elif menu == "Registro de Inventarios":
-    inventarios.render(conn)
-elif menu == "Importador Masivo":
-    importador.render(conn)
+  ventas.render(conn)
