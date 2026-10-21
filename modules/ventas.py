@@ -8,22 +8,13 @@ def render(conn):
     st.markdown("---")
 
     try:
-        # 1. Obtener la lista de estaciones disponibles
+        # 1. Obtener la lista de estaciones disponibles usando la columna correcta 'id_estacion'
         query_est = """
-            SELECT DISTINCT id AS "ID", nombre AS "Estacion", plaza AS "Plaza"
+            SELECT DISTINCT id_estacion AS "ID", nombre AS "Estacion", plaza AS "Plaza"
             FROM estaciones
-            ORDER BY plaza, id;
+            ORDER BY plaza, id_estacion;
         """
         df_estaciones = pd.read_sql(query_est, conn)
-        
-        if df_estaciones.empty:
-            # Alternativa por si el esquema usa id_estacion
-            query_est = """
-                SELECT DISTINCT id_estacion AS "ID", nombre AS "Estacion", plaza AS "Plaza"
-                FROM estaciones_detalle
-                ORDER BY plaza, id_estacion;
-            """
-            df_estaciones = pd.read_sql(query_est, conn)
 
         if df_estaciones.empty:
             st.warning("No se encontraron estaciones registradas en el sistema.")
