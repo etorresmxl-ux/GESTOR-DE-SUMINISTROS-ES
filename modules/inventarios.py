@@ -56,12 +56,12 @@ def render(conn):
         """
         df_existentes = pd.read_sql(query_inventarios_previos, conn)
 
-        # Inicializar columnas de productos en ceros
-        df_estaciones["Regular"] = 0.0
-        df_estaciones["Premium"] = 0.0
-        df_estaciones["Diesel"] = 0.0
+        # Inicializar columnas de productos en ceros (enteros)
+        df_estaciones["Regular"] = 0
+        df_estaciones["Premium"] = 0
+        df_estaciones["Diesel"] = 0
 
-        # Si ya hay registros previos, cargarlos en la matriz
+        # Si ya hay registros previos, cargarlos en la matriz como enteros
         if not df_existentes.empty:
             df_existentes["producto_norm"] = df_existentes["producto"].str.lower().str.strip()
             for idx, row in df_estaciones.iterrows():
@@ -72,17 +72,17 @@ def render(conn):
                 match_die = df_existentes[(df_existentes["id_estacion"] == e_id) & (df_existentes["producto_norm"].str.contains("diesel"))]
 
                 if not match_reg.empty and pd.notna(match_reg.iloc[0]["volumen"]):
-                    df_estaciones.loc[idx, "Regular"] = float(match_reg.iloc[0]["volumen"])
+                    df_estaciones.loc[idx, "Regular"] = int(float(match_reg.iloc[0]["volumen"]))
                 if not match_pre.empty and pd.notna(match_pre.iloc[0]["volumen"]):
-                    df_estaciones.loc[idx, "Premium"] = float(match_pre.iloc[0]["volumen"])
+                    df_estaciones.loc[idx, "Premium"] = int(float(match_pre.iloc[0]["volumen"]))
                 if not match_die.empty and pd.notna(match_die.iloc[0]["volumen"]):
-                    df_estaciones.loc[idx, "Diesel"] = float(match_die.iloc[0]["volumen"])
+                    df_estaciones.loc[idx, "Diesel"] = int(float(match_die.iloc[0]["volumen"]))
             
             st.success(f"📂 Se encontraron registros previos guardados para el día {fecha_seleccionada}. Puedes modificarlos directamente.")
         else:
             st.info(f"ℹ️ No hay registros previos para el día {fecha_seleccionada}. Ingresa los volúmenes correspondientes.")
 
-        # 5. Tabla Matriz Interactiva (Data Editor dentro de un Formulario)
+        # 5. Tabla Matriz Interactiva con formato de números enteros
         st.markdown(f"#### Matriz de Inventarios - `{usuario_seleccionado}` ({fecha_seleccionada})")
 
         with st.form("form_inventarios_matriz"):
@@ -93,12 +93,12 @@ def render(conn):
                     "TAD": st.column_config.TextColumn("TAD", disabled=True),
                     "Plaza": st.column_config.TextColumn("Plaza", disabled=True),
                     "Estacion": st.column_config.TextColumn("Nombre Estación", disabled=True),
-                    "Regular": st.column_config.NumberColumn("Regular (Lts)", min_value=0.0, format="%,.2f", step=100.0),
-                    "Premium": st.column_config.NumberColumn("Premium (Lts)", min_value=0.0, format="%,.2f", step=100.0),
-                    "Diesel": st.column_config.NumberColumn("Diesel (Lts)", min_value=0.0, format="%,.2f", step=100.0),
+                    "Regular": st.column_config.NumberColumn("Regular (Lts)", min_value=0, format="%,d", step=100),
+                    "Premium": st.column_config.NumberColumn("Premium (Lts)", min_value=0, format="%,d", step=100),
+                    "Diesel": st.column_config.NumberColumn("Diesel (Lts)", min_value=0, format="%,d", step=100),
                 },
                 hide_index=True,
-                width="stretch",
+                use_container_width=True,
                 num_rows="fixed",
                 height=500
             )
@@ -120,7 +120,6 @@ def render(conn):
                 for _, row in df_editado.iterrows():
                     e_id = str(row["ID"])
                     
-                    # Guardar cada producto si el valor es válido
                     productos_data = [
                         ("regular", float(row["Regular"])),
                         ("premium", float(row["Premium"])),
