@@ -18,14 +18,13 @@ st.sidebar.markdown("## ⛽ Gestión de Suministro")
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Navegación")
 
-# Importar los módulos activos: Dashboard, Inventarios e Importador
-from modules import dashboard, inventarios, importador
+# Importar exclusivamente los módulos activos[cite: 2, 4]
+from modules import dashboard, importador
 
 menu = st.sidebar.radio(
     "Selecciona un módulo:",
     [
         "Dashboard Operativo",
-        "Registro de Inventarios",
         "Importador Masivo",
     ],
 )
@@ -46,7 +45,5 @@ if st.sidebar.button("🔄 Refrescar Base de Datos", use_container_width=True):
 # --- ENRUTAMIENTO DE MÓDULOS ---
 if menu == "Dashboard Operativo":
     dashboard.render(conn)
-elif menu == "Registro de Inventarios":
-    inventarios.render(conn)
 elif menu == "Importador Masivo":
     importador.render(conn)
