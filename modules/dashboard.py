@@ -30,18 +30,20 @@ def render(conn):
     hoy_str = hoy.strftime("%Y-%m-%d")
 
     st.markdown("### 📊 Dashboard Operativo - Inventarios, Espacio Disponible y Días de Suministro (D/S)")
-    st.write("Resumen general por estación: Inventario teórico/actualizado al día de hoy (con indicador * si es arrastrado), capacidad máxima, cargas del día y Días de Suministro (VDP 12 semanas).")
+    st.write("Resumen general por estación: Inventario teórico/actualizado al día de hoy (con indicador * si es arrastrado), capacidad máxima, cargas del día y Días de Suministro (VDP Ponderada).")
     
+    # Consulta actualizada utilizando el esquema normalizado y nuestra vista de VDP ponderada
     query = """
         WITH ultimo_inventario AS (
             SELECT 
-                estacion_id,
+                id_estacion,
                 fecha,
-                regular,
-                premium,
-                diesel,
-                ROW_NUMBER() OVER(PARTITION BY estacion_id ORDER BY fecha DESC) as rn
-            FROM inventarios_historico
+                SUM(CASE WHEN producto ILIKE '%regular%' OR producto ILIKE '%magna%' THEN volumen ELSE 0 END) as regular,
+                SUM(CASE WHEN producto ILIKE '%premium%' THEN volumen ELSE 0 END) as premium,
+                SUM(CASE WHEN producto ILIKE '%diesel%' THEN volumen ELSE 0 END) as diesel,
+                ROW_NUMBER() OVER(PARTITION BY id_estacion ORDER BY fecha DESC) as rn
+            FROM inventarios
+            GROUP BY id_estacion, fecha
         ),
         capacidades_productos AS (
             SELECT 
@@ -58,7 +60,16 @@ def render(conn):
                 tad,
                 plaza,
                 nombre as estacion
-            FROM estaciones_detalle
+            FROM estaciones
+        ),
+        vdp_resumen AS (
+            SELECT 
+                id_estacion,
+                SUM(CASE WHEN producto ILIKE '%regular%' OR producto ILIKE '%magna%' THEN vdp_ponderada ELSE 0 END) as vdp_reg,
+                SUM(CASE WHEN producto ILIKE '%premium%' THEN vdp_ponderada ELSE 0 END) as vdp_pre,
+                SUM(CASE WHEN producto ILIKE '%diesel%' THEN vdp_ponderada ELSE 0 END) as vdp_die
+            FROM v_vdp_analisis
+            GROUP BY id_estacion
         )
         SELECT 
             ib.id_estacion,
@@ -72,13 +83,13 @@ def render(conn):
             COALESCE(ui.premium, 0) as pre_litros,
             COALESCE(ui.diesel, 0) as die_litros,
             ui.fecha as fecha_inventario,
-            COALESCE(vp.vdp_regular, 0) as vdp_reg,
-            COALESCE(vp.vdp_premium, 0) as vdp_pre,
-            COALESCE(vp.vdp_diesel, 0) as vdp_die
+            COALESCE(vp.vdp_reg, 0) as vdp_reg,
+            COALESCE(vp.vdp_pre, 0) as vdp_pre,
+            COALESCE(vp.vdp_die, 0) as vdp_die
         FROM info_base ib
-        LEFT JOIN ultimo_inventario ui ON ib.id_estacion = ui.estacion_id AND ui.rn = 1
+        LEFT JOIN ultimo_inventario ui ON ib.id_estacion = ui.id_estacion AND ui.rn = 1
         LEFT JOIN capacidades_productos cp ON ib.id_estacion = cp.id_estacion
-        LEFT JOIN vdp_ponderado_12w vp ON ib.id_estacion = vp.estacion_id
+        LEFT JOIN vdp_resumen vp ON ib.id_estacion = vp.id_estacion
         ORDER BY ib.id_estacion;
     """
     
