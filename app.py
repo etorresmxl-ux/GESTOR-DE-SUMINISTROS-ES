@@ -1,13 +1,13 @@
-import streamlit as st
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from database import init_connection
+import streamlit as st
 
 # Configuración inicial de la página
 st.set_page_config(
     page_title="Gestión de Suministro - Gasolineras",
     page_icon="⛽",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # Inicializar conexión a base de datos
@@ -19,8 +19,7 @@ st.sidebar.markdown("---")
 
 st.sidebar.markdown("### Navegación")
 
-# Definir las opciones de navegación disponibles de forma segura
-# (Asegúrate de importar solo los módulos que existen en tu carpeta 'modules')
+# Módulos disponibles
 from modules import dashboard, ventas
 
 menu = st.sidebar.radio(
@@ -28,8 +27,7 @@ menu = st.sidebar.radio(
     [
         "Dashboard Operativo",
         "Registro de Ventas",
-        # Puedes ir agregando los demás módulos conforme los vayamos conectando
-    ]
+    ],
 )
 
 st.sidebar.markdown("---")
@@ -41,12 +39,12 @@ st.sidebar.write(f"⏰ {ahora_local.strftime('%H:%M:%S (UTC-7)')}")
 
 st.sidebar.markdown("---")
 if st.sidebar.button("🔄 Refrescar Base de Datos", use_container_width=True):
-    st.cache_data.clear()
-    st.success("¡Caché refrescada con éxito!")
-    st.rerun()
+  st.cache_data.clear()
+  st.success("¡Caché refrescada con éxito!")
+  st.rerun()
 
 # --- ENRUTAMIENTO DE MÓDULOS ---
 if menu == "Dashboard Operativo":
-    dashboard.render(conn)
+  dashboard.render(conn)
 elif menu == "Registro de Ventas":
-    ventas.render(conn)
+  ventas.render(conn)
