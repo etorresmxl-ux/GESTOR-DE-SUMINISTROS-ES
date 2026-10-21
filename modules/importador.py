@@ -31,18 +31,18 @@ def limpiar_numero_preservando_ceros(val):
         return None
 
 def normalizar_producto(producto_raw):
-    """Estandariza los nombres de productos."""
+    """Estandariza los nombres de productos estrictamente en minúsculas para consistencia con el dashboard."""
     if pd.isna(producto_raw):
         return ""
     p_str = str(producto_raw).strip().lower()
     if 'regular' in p_str or 'magna' in p_str:
-        return 'Regular'
+        return 'regular'
     elif 'premium' in p_str:
-        return 'Premium'
+        return 'premium'
     elif 'diesel' in p_str:
-        return 'Diesel'
+        return 'diesel'
     else:
-        return str(producto_raw).strip()
+        return p_str
 
 def dataframe_a_excel_bytes(df):
     output = io.BytesIO()
@@ -52,10 +52,10 @@ def dataframe_a_excel_bytes(df):
 
 def render(conn):
     st.markdown("### 📥 Módulo de Importación Masiva (Excel / CSV)")
-    st.write("Sube tus archivos de Excel (`.xlsx`) o CSV apegados a la estructura normalizada (`fecha`, `id_estacion`, `producto`, `volumen`).")
+    st.write("Sube tus archivos de Excel (.xlsx) o CSV apegados a la estructura normalizada (`fecha`, `id_estacion`, `producto`, `volumen`).")
     
     tab_inv, tab_ventas = st.tabs(["📦 Inventarios", "📊 Ventas"])
-    
+
     # ==========================================
     # 1. INVENTARIOS
     # ==========================================
@@ -86,7 +86,7 @@ def render(conn):
                 df_inv['producto'] = df_inv['producto'].apply(normalizar_producto)
                 df_inv['volumen'] = df_inv['volumen'].apply(limpiar_numero_preservando_ceros)
 
-                # Sumar volúmenes automáticamente si existen múltiples registros (ej. tanques múltiples / expansiones como E12325)
+                # Sumar volúmenes automáticamente si existen múltiples registros (ej. tanques múltiples)
                 df_inv = df_inv.groupby(['fecha', 'id_estacion', 'producto'], as_index=False)['volumen'].sum()
 
                 st.info(f"📊 Archivo cargado y sanitizado. Total de registros consolidados: {len(df_inv)}")
@@ -103,16 +103,17 @@ def render(conn):
                     count = 0
                     for _, row in df_inv.iterrows():
                         if pd.notna(row['fecha']) and row['id_estacion'] != "":
+                            vol_val = float(row['volumen']) if pd.notna(row['volumen']) else None
                             cursor.execute(sql_upsert_inv, (
                                 str(row['fecha']),
                                 str(row['id_estacion']),
                                 str(row['producto']),
-                                float(row['volumen']) if pd.notna(row['volumen']) else None
+                                vol_val
                             ))
                             count += 1
                     conn.commit()
                     cursor.close()
-                    st.success(f"¡Se procesaron e importaron {count} registros de inventarios exitosamente!")
+                    st.success(f"¡Se procesaron e importaron {count} registros de inventarios exitosamente en la tabla 'inventarios'!")
             except Exception as e:
                 st.error(f"Error al procesar el archivo de inventarios: {e}")
 
@@ -163,15 +164,16 @@ def render(conn):
                     count = 0
                     for _, row in df_ventas.iterrows():
                         if pd.notna(row['fecha']) and row['id_estacion'] != "":
+                            vol_val = float(row['volumen']) if pd.notna(row['volumen']) else None
                             cursor.execute(sql_upsert_ventas, (
                                 str(row['fecha']),
                                 str(row['id_estacion']),
                                 str(row['producto']),
-                                float(row['volumen']) if pd.notna(row['volumen']) else None
+                                vol_val
                             ))
                             count += 1
                     conn.commit()
                     cursor.close()
-                    st.success(f"¡Se procesaron e importaron {count} registros de ventas exitosamente!")
+                    st.success(f"¡Se procesaron e importaron {count} registros de ventas exitosamente en la tabla 'ventas'!")
             except Exception as e:
                 st.error(f"Error al procesar el archivo de ventas: {e}")
