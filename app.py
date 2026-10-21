@@ -19,7 +19,7 @@ st.sidebar.markdown("---")
 
 st.sidebar.markdown("### Navegación")
 
-# Módulos disponibles
+# Importar solo los módulos activos existentes en la carpeta 'modules'
 from modules import dashboard, ventas
 
 menu = st.sidebar.radio(
