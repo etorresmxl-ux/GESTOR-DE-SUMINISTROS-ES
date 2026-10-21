@@ -38,7 +38,7 @@ st.sidebar.write(f"📅 {ahora_local.strftime('%Y-%m-%d')}")
 st.sidebar.write(f"⏰ {ahora_local.strftime('%H:%M:%S (UTC-7)')}")
 
 st.sidebar.markdown("---")
-if st.sidebar.button("🔄 Refrescar Base de Datos", use_consumer_width=True if hasattr(st, "use_consumer_width") else True):
+if st.sidebar.button("🔄 Refrescar Base de Datos", use_container_width=True):
     st.cache_data.clear()
     st.success("¡Caché refrescada con éxito!")
     st.rerun()
