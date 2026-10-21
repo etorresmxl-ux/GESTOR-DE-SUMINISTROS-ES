@@ -1,9 +1,9 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import numpy as np
 import pandas as pd
 import streamlit as st
 
-# Umbral Z global para evitar cualquier problema de alcance de variable
+### Umbral Z global para evitar cualquier problema de alcance de variable
 UMBRAL_Z = 2.5
 
 
@@ -18,70 +18,61 @@ def evaluar_y_gestionar_venta(
     return "IGNORADO"
 
   try:
-    # Obtener el día de la semana de la fecha ingresada (0 = Lunes, 6 = Domingo)
-    dt_obj = pd.to_datetime(fecha_str)
-    dia_semana = dt_obj.dayofweek
+    # Obtener el día de la semana (0=Lunes, 6=Domingo) para la fecha dada
+    dt_fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
+    dia_semana = dt_fecha.weekday()
 
-    # Consultar datos históricos para la misma estación y el mismo día de la semana
+    # Consultar histórico de las últimas 12 semanas para el mismo día de la semana
     query_hist = f"""
-        SELECT fecha, {prod_col} 
-        FROM ventas_historico 
-        WHERE estacion_id = %s 
-          AND EXTRACT(DOW FROM fecha) = %s 
-          AND fecha < %s 
-          AND ignorar_en_promedio = FALSE
-        ORDER BY fecha DESC
-        LIMIT 12;
-    """
-    cursor.execute(query_hist, (estacion_id, dia_semana, fecha_str))
-    filas = cursor.fetchall()
+            SELECT fecha, {prod_col} 
+            FROM ventas_historico 
+            WHERE estacion_id = %s 
+              AND fecha < %s 
+              AND EXTRACT(ISODOW FROM fecha) = %s
+              AND (ignorar_en_promedio IS NOT TRUE OR ignorar_en_promedio = FALSE)
+            ORDER BY fecha DESC 
+            LIMIT 12;
+        """
+    cursor.execute(query_hist, (estacion_id, fecha_str, dia_semana + 1))
+    rows = cursor.fetchall()
 
-    # Extraer valores numéricos válidos
-    valores = [float(row[1]) for row in filas if row[1] is not None]
+    volumenes = [float(r[1]) for r in rows if r[1] is not None and float(r[1]) > 0]
 
-    # Si no hay suficientes datos históricos, se acepta la venta directamente
-    if len(valores) < 3:
-      _insertar_venta_oficial(cursor, estacion_id, fecha_str, prod_col, volumen)
+    # Si no hay suficientes datos históricos (menos de 3), se acepta por defecto como NORMAL
+    if len(volumenes) < 3:
+      _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen)
       cursor.close()
       return "NORMAL"
 
-    media = np.mean(valores)
-    desv_est = np.std(valores)
+    media = np.mean(volumenes)
+    desv_est = np.std(volumenes, ddof=1) if len(volumenes) > 1 else 0.0
 
-    # Si la desviación estándar es cero, se compara directamente con la media
-    if desv_est == 0:
-      if volumen == media:
-        _insertar_venta_oficial(
-            cursor, estacion_id, fecha_str, prod_col, volumen
-        )
-        cursor.close()
-        return "NORMAL"
+    if desv_est == 0 or np.isnan(desv_est):
+      if abs(volumen - media) > (0.1 * media):
+        z_score = 99.9
       else:
-        z_score = 99.9  # Desviación alta respecto a una media constante
+        z_score = 0.0
     else:
       z_score = abs((volumen - media) / desv_est)
 
-    # Evaluar contra el umbral Z global
-    if z_score <= UMBRAL_Z:
-      _insertar_venta_oficial(
-          cursor, estacion_id, fecha_str, prod_col, volumen
-      )
-      cursor.close()
-      return "NORMAL"
-    else:
+    if z_score > UMBRAL_Z:
       _enviar_a_cuarentena(
           cursor,
           estacion_id,
           fecha_str,
-          prod_col,
+          producto,
           volumen,
-          float(media),
-          float(desv_est),
-          float(z_score),
+          media,
+          desv_est,
+          z_score,
           metodo_carga,
       )
       cursor.close()
       return "ANOMALIA"
+    else:
+      _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen)
+      cursor.close()
+      return "NORMAL"
 
   except Exception as e:
     cursor.close()
@@ -92,13 +83,11 @@ def _insertar_venta_oficial(cursor, estacion_id, fecha_str, producto, volumen):
   prod_col = producto.lower().strip()
   if prod_col not in ["regular", "premium", "diesel"]:
     return
-
   sql_upsert = f"""
         INSERT INTO ventas_historico (estacion_id, fecha, {prod_col}, ignorar_en_promedio)
         VALUES (%s, %s, %s, FALSE)
         ON CONFLICT (estacion_id, fecha) 
-        DO UPDATE SET 
-            {prod_col} = COALESCE(EXCLUDED.{prod_col}, ventas_historico.{prod_col});
+        DO UPDATE SET {prod_col} = COALESCE(EXCLUDED.{prod_col}, ventas_historico.{prod_col});
     """
   cursor.execute(sql_upsert, (estacion_id, fecha_str, volumen))
 
@@ -134,16 +123,14 @@ def _enviar_a_cuarentena(
 
 
 def render(conn):
-  st.markdown(
-      "### 📊 Registro Semanal de Ventas (Con Auditoría de Anomalías)"
-  )
-  st.write(
-      "Captura o actualiza las ventas diarias (de lunes a domingo) para las"
-      " estaciones asignadas al usuario."
-  )
-
   try:
-    # 1. Obtener la lista de programadores desde 'usuarios_estaciones'[cite: 16]
+    st.markdown("### 📊 Registro Semanal de Ventas (Con Auditoría de Anomalías)")
+    st.write(
+        "Captura o actualiza las ventas diarias (de lunes a domingo) para las"
+        " estaciones asignadas al usuario."
+    )
+
+    # 1. Obtener la lista de programadores[cite: 14]
     query_prog = (
         "SELECT DISTINCT usuario FROM usuarios_estaciones WHERE usuario IS NOT"
         " NULL ORDER BY usuario;"
@@ -309,12 +296,12 @@ def render(conn):
           conn.commit()
           st.success(
               "¡Proceso completado! Registros guardados con éxito:"
-              f" {normales_count}."
+              f" {normales_count} normales."
           )
           if anomalias_count > 0:
             st.warning(
                 "⚠️ Se detectaron y enviaron **"
-                f" {anomalias_count} registros a Cuarentena"
+                f"{anomalias_count} registros a Cuarentena"
                 " (`ventas_anomalias`)** por superar el umbral estadístico de"
                 " desviación."
             )
