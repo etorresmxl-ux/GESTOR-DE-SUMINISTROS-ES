@@ -143,10 +143,10 @@ def render(conn):
   )
 
   try:
-    # 1. Obtener la lista de programadores corregida a 'estaciones_detalle' y '"user"'[cite: 16]
+    # 1. Obtener la lista de programadores desde 'usuarios_estaciones'[cite: 16]
     query_prog = (
-        'SELECT DISTINCT "user" AS usuario FROM estaciones_detalle WHERE "user"'
-        " IS NOT NULL ORDER BY usuario;"
+        "SELECT DISTINCT usuario FROM usuarios_estaciones WHERE usuario IS NOT"
+        " NULL ORDER BY usuario;"
     )
     df_prog = pd.read_sql(query_prog, conn)
 
@@ -180,12 +180,13 @@ def render(conn):
     )
     st.markdown("---")
 
-    # 3. Obtener estaciones del programador desde 'estaciones_detalle'[cite: 16]
+    # 3. Obtener estaciones del programador haciendo JOIN con 'estaciones' y 'usuarios_estaciones'[cite: 16]
     query_est = f"""
-        SELECT DISTINCT id_estacion AS "ID", plaza AS "Plaza", nombre AS "Estacion"
-        FROM estaciones_detalle
-        WHERE "user" = '{usuario_seleccionado}'
-        ORDER BY plaza, id_estacion;
+        SELECT e.id AS "ID", e.plaza AS "Plaza", e.nombre AS "Estacion"
+        FROM estaciones e
+        JOIN usuarios_estaciones ue ON e.id = ue.id_estacion
+        WHERE ue.usuario = '{usuario_seleccionado}'
+        ORDER BY e.plaza, e.id;
     """
     df_estaciones = pd.read_sql(query_est, conn)
 
