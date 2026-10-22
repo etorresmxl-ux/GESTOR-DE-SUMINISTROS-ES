@@ -267,7 +267,7 @@ def render(conn):
                             
                             alertas.append({
                                 "prioridad": 1,
-                                "nivel": "🔴 SOBRE-CARGA (No cabe con Venta)",
+                                "nivel": "🔴 SOBRE-CARGA",
                                 "estacion": f"{r['id_estacion']} - {r['estacion']}",
                                 "plaza": str(r["plaza"]),
                                 "producto": prod,
