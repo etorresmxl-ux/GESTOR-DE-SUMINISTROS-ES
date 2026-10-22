@@ -367,26 +367,54 @@ def render(conn):
                 "programa": programa_status,
             })
 
-          # 2. Alerta por Sobre-carga (Carga programada hoy > Espacio disponible actual)
-          if vol_carga_hoy > 0 and pd.notna(espacio) and vol_carga_hoy > espacio:
-            exceso = vol_carga_hoy - espacio
-            programa_status = (
-                f"⚠️ SOBRE-CARGA: {vol_carga_hoy:,.0f} L (Espacio:"
-                f" {espacio:,.0f} L, Exceso: {exceso:,.0f} L)"
-            )
+          # 2. Alertas de Sobre-carga diferenciadas
+          espacio_post_venta = cap - (litros - vdp)
 
-            alertas.append({
-                "prioridad": 1,
-                "nivel": "⚠️ SOBRE-CARGA (Excede Espacio)",
-                "estacion": f"{r['id_estacion']} - {r['estacion']}",
-                "plaza": str(r["plaza"]),
-                "producto": prod,
-                "litros_val": str_inv_actual,
-                "vta_hoy": f"{vdp:,.0f} L",
-                "ds": ds if pd.notna(ds) else 999.0,
-                "espacio": espacio,
-                "programa": programa_status,
-            })
+          if (
+              vol_carga_hoy > 0
+              and pd.notna(espacio)
+              and pd.notna(espacio_post_venta)
+          ):
+            if vol_carga_hoy > espacio_post_venta:
+              # SOBRE-CARGA DEFINITIVA: Ni restando la venta del día cabe la carga
+              exceso = vol_carga_hoy - espacio_post_venta
+              programa_status = (
+                  f"🔴 SOBRE-CARGA: {vol_carga_hoy:,.0f} L (Espacio Post-Venta:"
+                  f" {espacio_post_venta:,.0f} L, Exceso: {exceso:,.0f} L)"
+              )
+
+              alertas.append({
+                  "prioridad": 1,
+                  "nivel": "🔴 SOBRE-CARGA (No cabe con Venta)",
+                  "estacion": f"{r['id_estacion']} - {r['estacion']}",
+                  "plaza": str(r["plaza"]),
+                  "producto": prod,
+                  "litros_val": str_inv_actual,
+                  "vta_hoy": f"{vdp:,.0f} L",
+                  "ds": ds if pd.notna(ds) else 999.0,
+                  "espacio": espacio,
+                  "programa": programa_status,
+              })
+            elif vol_carga_hoy > espacio:
+              # POSIBLE-SOBRECARGA: No cabe con el inventario actual, pero sí cabrá con las ventas del día
+              exceso = vol_carga_hoy - espacio
+              programa_status = (
+                  f"🟡 POSIBLE-SOBRECARGA: {vol_carga_hoy:,.0f} L (Espacio"
+                  f" Actual: {espacio:,.0f} L, Exceso: {exceso:,.0f} L)"
+              )
+
+              alertas.append({
+                  "prioridad": 2,
+                  "nivel": "🟡 POSIBLE-SOBRECARGA",
+                  "estacion": f"{r['id_estacion']} - {r['estacion']}",
+                  "plaza": str(r["plaza"]),
+                  "producto": prod,
+                  "litros_val": str_inv_actual,
+                  "vta_hoy": f"{vdp:,.0f} L",
+                  "ds": ds if pd.notna(ds) else 999.0,
+                  "espacio": espacio,
+                  "programa": programa_status,
+              })
 
     if not alertas:
       st.success(
