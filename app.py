@@ -18,8 +18,8 @@ st.sidebar.markdown("## ⛽ Gestión de Suministro")
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Navegación")
 
-# Importar los módulos activos: Dashboard, Inventarios, Ventas e Importador[cite: 6, 8]
-from modules import dashboard, inventarios, ventas, importador
+# Importar los módulos activos: Dashboard, Inventarios, Ventas, Programación e Importador[cite: 5, 6]
+from modules import dashboard, inventarios, ventas, programacion, importador
 
 menu = st.sidebar.radio(
     "Selecciona un módulo:",
@@ -27,6 +27,7 @@ menu = st.sidebar.radio(
         "Dashboard Operativo",
         "Registro de Inventarios",
         "Registro de Ventas",
+        "Matriz de Programación",
         "Importador Masivo",
     ],
 )
@@ -51,5 +52,7 @@ elif menu == "Registro de Inventarios":
     inventarios.render(conn)
 elif menu == "Registro de Ventas":
     ventas.render(conn)
+elif menu == "Matriz de Programación":
+    programacion.render(conn)
 elif menu == "Importador Masivo":
     importador.render(conn)
