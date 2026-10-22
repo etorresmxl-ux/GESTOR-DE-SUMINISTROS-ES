@@ -329,7 +329,7 @@ def render(conn):
         # ==========================================
         # 2. RESUMEN DEL PROGRAMA DE CARGAS DEL DÍA EN CURSO
         # ==========================================
-        st.markdown(f"### 🚛 Resumen del Programa de Cargas del Día en Curso ({hoy_str})")
+        st.markdown(f"### 🚛 Resumen del Programa de Cargas ({hoy_str})")
         st.write("Listado consolidado de las órdenes de carga programadas para hoy con su asignación de usuario, estación, plaza y TAD.")
 
         try:
