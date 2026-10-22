@@ -18,8 +18,8 @@ st.sidebar.markdown("## ⛽ Gestión de Suministro")
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Navegación")
 
-# Importar los módulos activos incluyendo el agente validador
-from modules import dashboard, inventarios, ventas, importador, agente_validador
+# Importar los módulos activos incluyendo el Agente de Visión
+from modules import dashboard, inventarios, ventas, importador, agente_vision
 
 menu = st.sidebar.radio(
     "Selecciona un módulo:",
@@ -27,7 +27,7 @@ menu = st.sidebar.radio(
         "Dashboard Operativo",
         "Registro de Inventarios",
         "Registro de Ventas",
-        "Agente IA Validador",
+        "Agente IA (Visión)",
         "Importador Masivo",
     ],
 )
@@ -52,7 +52,7 @@ elif menu == "Registro de Inventarios":
     inventarios.render(conn)
 elif menu == "Registro de Ventas":
     ventas.render(conn)
-elif menu == "Agente IA Validador":
-    agente_validador.render(conn)
+elif menu == "Agente IA (Visión)":
+    agente_vision.render(conn)
 elif menu == "Importador Masivo":
     importador.render(conn)
