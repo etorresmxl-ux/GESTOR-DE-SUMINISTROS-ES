@@ -296,36 +296,32 @@ def render(conn):
 
                 st.markdown("---")
                 
-                # Resúmenes por TAD y por Producto
-                col_tad, col_prod = st.columns(2)
+                # Resumen de Cargas por TAD con columnas desglosadas por producto y total general
+                st.markdown("##### 🏢 Total de Cargas por Terminal (TAD)")
+                
+                df_tad_pivot = df_cargas_hoy.pivot_table(
+                    index="tad",
+                    columns="producto_norm",
+                    values="volumen_programado",
+                    aggfunc="count",
+                    fill_value=0
+                ).reset_index()
 
-                with col_tad:
-                    st.markdown("##### 🏢 Total de Cargas por TAD")
-                    df_tad_summary = df_cargas_hoy.groupby("tad", as_index=False)["volumen_programado"].agg(
-                        Total_Volumen=("sum"),
-                        Numero_Cargas=("count")
-                    )
-                    
-                    tabla_tad_vis = pd.DataFrame({
-                        "TAD": df_tad_summary["tad"],
-                        "N° Cargas": df_tad_summary["Numero_Cargas"],
-                        "Volumen Total": df_tad_summary["Total_Volumen"].apply(lambda x: f"{x:,.0f} L")
-                    })
-                    st.dataframe(tabla_tad_vis, width="stretch", hide_index=True)
+                for prod_col in ["regular", "premium", "diesel"]:
+                    if prod_col not in df_tad_pivot.columns:
+                        df_tad_pivot[prod_col] = 0
 
-                with col_prod:
-                    st.markdown("##### ⛽ Resumen por Producto y Viajes")
-                    df_prod_summary = df_cargas_hoy.groupby("producto_norm", as_index=False)["volumen_programado"].agg(
-                        Total_Volumen=("sum"),
-                        Numero_Cargas=("count")
-                    )
-                    
-                    tabla_prod_vis = pd.DataFrame({
-                        "Producto": df_prod_summary["producto_norm"].str.capitalize(),
-                        "N° Viajes (Cargas)": df_prod_summary["Numero_Cargas"],
-                        "Volumen Total": df_prod_summary["Total_Volumen"].apply(lambda x: f"{x:,.0f} L")
-                    })
-                    st.dataframe(tabla_prod_vis, width="stretch", hide_index=True)
+                df_tad_pivot["Total Cargas"] = df_tad_pivot["regular"] + df_tad_pivot["premium"] + df_tad_pivot["diesel"]
+
+                tabla_tad_vis = pd.DataFrame({
+                    "TAD": df_tad_pivot["tad"],
+                    "Regular": df_tad_pivot["regular"],
+                    "Premium": df_tad_pivot["premium"],
+                    "Diesel": df_tad_pivot["diesel"],
+                    "Total Cargas": df_tad_pivot["Total Cargas"]
+                })
+                
+                st.dataframe(tabla_tad_vis, width="stretch", hide_index=True)
 
         except Exception as e_cargas_hoy:
             st.warning(f"No se pudo cargar el resumen del programa de cargas de hoy: {e_cargas_hoy}")
