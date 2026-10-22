@@ -270,9 +270,15 @@ def render(conn):
                     e.plaza,
                     e.nombre as estacion,
                     pc.producto,
-                    pc.volumen_programado
+                    pc.volumen_programado,
+                    COALESCE(ue.usuario, 'Sin Asignar') as usuario
                 FROM programacion_cargas pc
                 JOIN estaciones e ON pc.id_estacion = e.id_estacion
+                LEFT JOIN (
+                    SELECT id_estacion, MIN(usuario) as usuario 
+                    FROM usuarios_estaciones 
+                    GROUP BY id_estacion
+                ) ue ON e.id_estacion = ue.id_estacion
                 WHERE pc.fecha_programacion = '{hoy_str}';
             """
             df_cargas_hoy = pd.read_sql(query_cargas_hoy_detalle, conn)
@@ -282,11 +288,27 @@ def render(conn):
             else:
                 df_cargas_hoy['producto_norm'] = df_cargas_hoy['producto'].apply(normalizar_producto)
                 
-                # Detalle de cargas de hoy
+                def formatear_tad(tad_val):
+                    if pd.isna(tad_val):
+                        return "N/A"
+                    t_str = str(tad_val).strip()
+                    mapa = {
+                        '636': '636 - Rosarito',
+                        '637': '637 - Hermosillo',
+                        '638': '638 - Mexicali',
+                        '639': '639 - Ensenada',
+                        '640': '640 - Magdalena',
+                        '641': '641 - Nogales',
+                        '646': '646 - Obregón'
+                    }
+                    return mapa.get(t_str, t_str)
+
+                # Detalle de cargas de hoy (con usuario al inicio y TAD nombrado)
                 st.markdown("##### 📋 Detalle de Cargas Programadas Hoy")
                 tabla_cargas_vis = pd.DataFrame({
+                    "Usuario": df_cargas_hoy["usuario"],
                     "ID Estación": df_cargas_hoy["id_estacion"],
-                    "TAD": df_cargas_hoy["tad"],
+                    "TAD": df_cargas_hoy["tad"].apply(formatear_tad),
                     "Plaza": df_cargas_hoy["plaza"],
                     "Estación": df_cargas_hoy["estacion"],
                     "Producto": df_cargas_hoy["producto"],
@@ -296,7 +318,7 @@ def render(conn):
 
                 st.markdown("---")
                 
-                # Resumen de Cargas por TAD con columnas desglosadas por producto y total general
+                # Resumen de Cargas por TAD con columnas desglosadas por producto y nombres oficiales
                 st.markdown("##### 🏢 Total de Cargas por Terminal (TAD)")
                 
                 df_tad_pivot = df_cargas_hoy.pivot_table(
@@ -314,7 +336,7 @@ def render(conn):
                 df_tad_pivot["Total Cargas"] = df_tad_pivot["regular"] + df_tad_pivot["premium"] + df_tad_pivot["diesel"]
 
                 tabla_tad_vis = pd.DataFrame({
-                    "TAD": df_tad_pivot["tad"],
+                    "TAD": df_tad_pivot["tad"].apply(formatear_tad),
                     "Regular": df_tad_pivot["regular"],
                     "Premium": df_tad_pivot["premium"],
                     "Diesel": df_tad_pivot["diesel"],
