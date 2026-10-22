@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta, timezone
 from database import init_connection
+from modules import dashboard, importador, inventarios, programacion, reportes, ventas
 import streamlit as st
 
-# Configuración inicial de la página
+##### Configuración inicial de la página
 st.set_page_config(
     page_title="Gestión de Suministro - Gasolineras",
     page_icon="⛽",
@@ -10,24 +11,23 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Inicializar conexión a base de datos
+##### Inicializar conexión a base de datos
 conn = init_connection()
 
-# --- BARRA LATERAL DE NAVEGACIÓN ---
+##### --- BARRA LATERAL DE NAVEGACIÓN ---
 st.sidebar.markdown("## ⛽ Gestión de Suministro")
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Navegación")
 
-# Importar los módulos activos: Dashboard, Inventarios, Ventas, Programación e Importador[cite: 5, 6]
-from modules import dashboard, inventarios, ventas, programacion, importador
-
+##### Importar y ordenar los módulos según el orden requerido
 menu = st.sidebar.radio(
     "Selecciona un módulo:",
     [
         "Dashboard Operativo",
+        "Matriz de Programación",
         "Registro de Inventarios",
         "Registro de Ventas",
-        "Matriz de Programación",
+        "Reportes Operativos",
         "Importador Masivo",
     ],
 )
@@ -41,18 +41,20 @@ st.sidebar.write(f"⏰ {ahora_local.strftime('%H:%M:%S (UTC-7)')}")
 
 st.sidebar.markdown("---")
 if st.sidebar.button("🔄 Refrescar Base de Datos", use_container_width=True):
-    st.cache_data.clear()
-    st.success("¡Caché refrescada con éxito!")
-    st.rerun()
+  st.cache_data.clear()
+  st.success("¡Caché refrescada con éxito!")
+  st.rerun()
 
-# --- ENRUTAMIENTO DE MÓDULOS ---
+##### --- ENRUTAMIENTO DE MÓDULOS ---
 if menu == "Dashboard Operativo":
-    dashboard.render(conn)
-elif menu == "Registro de Inventarios":
-    inventarios.render(conn)
-elif menu == "Registro de Ventas":
-    ventas.render(conn)
+  dashboard.render(conn)
 elif menu == "Matriz de Programación":
-    programacion.render(conn)
+  programacion.render(conn)
+elif menu == "Registro de Inventarios":
+  inventarios.render(conn)
+elif menu == "Registro de Ventas":
+  ventas.render(conn)
+elif menu == "Reportes Operativos":
+  reportes.render(conn)
 elif menu == "Importador Masivo":
-    importador.render(conn)
+  importador.render(conn)
