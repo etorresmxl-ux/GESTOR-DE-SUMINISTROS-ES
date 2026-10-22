@@ -379,7 +379,7 @@ def render(conn):
               # SOBRE-CARGA DEFINITIVA: Ni restando la venta del día cabe la carga
               exceso = vol_carga_hoy - espacio_post_venta
               programa_status = (
-                  f"🔴 SOBRE-CARGA: {vol_carga_hoy:,.0f} L (Espacio Post-Venta:"
+                  f"⚠️ SOBRE-CARGA: {vol_carga_hoy:,.0f} L (Espacio Post-Venta:"
                   f" {espacio_post_venta:,.0f} L, Exceso: {exceso:,.0f} L)"
               )
 
@@ -399,7 +399,7 @@ def render(conn):
               # POSIBLE-SOBRECARGA: No cabe con el inventario actual, pero sí cabrá con las ventas del día
               exceso = vol_carga_hoy - espacio
               programa_status = (
-                  f"🟡 POSIBLE-SOBRECARGA: {vol_carga_hoy:,.0f} L (Espacio"
+                  f"⚠️ POSIBLE-SOBRECARGA: {vol_carga_hoy:,.0f} L (Espacio"
                   f" Actual: {espacio:,.0f} L, Exceso: {exceso:,.0f} L)"
               )
 
