@@ -36,12 +36,12 @@ def render(conn):
   )
   st.write(
       "Resumen general por estación: Inventario teórico/actualizado al día de"
-      " hoy (con indicador * si es arrastrado), capacidad máxima, cargas del"
-      " día y Días de Suministro (VDP Ponderada)."
+      " hoy (con indicador * si es arrastrado), capacidad máxima real de"
+      " tanques, cargas del día y Días de Suministro (VDP Ponderada)."
   )
 
-  ### Consulta utilizando la vista v_vdp_analisis y el nuevo esquema normalizado
-  query = """
+  ### Consulta utilizando inventarios, VDP y la tabla real de tanques
+  query = f"""
     WITH ultimo_inventario AS (
         SELECT 
             id_estacion, 
@@ -65,16 +65,24 @@ def render(conn):
             SUM(CASE WHEN producto ILIKE '%diesel%' THEN vdp_ponderada ELSE 0 END) as vdp_die
         FROM v_vdp_analisis
         GROUP BY id_estacion
+    ),
+    capacidades_tanques AS (
+        SELECT 
+            id_estacion,
+            SUM(CASE WHEN producto ILIKE '%regular%' OR producto ILIKE '%magna%' THEN capacidad_maxima ELSE 0 END) as cap_reg,
+            SUM(CASE WHEN producto ILIKE '%premium%' THEN capacidad_maxima ELSE 0 END) as cap_pre,
+            SUM(CASE WHEN producto ILIKE '%diesel%' THEN capacidad_maxima ELSE 0 END) as cap_die
+        FROM tanques
+        GROUP BY id_estacion
     )
     SELECT 
         ib.id_estacion,
         ib.tad,
         ib.plaza,
         ib.estacion,
-        -- Asignación temporal de capacidades estándar mientras se configura el detalle de tanques
-        50000 as cap_regular,
-        30000 as cap_premium,
-        30000 as cap_diesel,
+        COALESCE(ct.cap_reg, 0) as cap_regular,
+        COALESCE(ct.cap_pre, 0) as cap_premium,
+        COALESCE(ct.cap_die, 0) as cap_diesel,
         COALESCE(ui.regular, 0) as reg_litros,
         COALESCE(ui.premium, 0) as pre_litros,
         COALESCE(ui.diesel, 0) as die_litros,
@@ -85,6 +93,7 @@ def render(conn):
     FROM info_base ib
     LEFT JOIN ultimo_inventario ui ON ib.id_estacion = ui.id_estacion AND ui.rn = 1
     LEFT JOIN vdp_resumen vp ON ib.id_estacion = vp.id_estacion
+    LEFT JOIN capacidades_tanques ct ON ib.id_estacion = ct.id_estacion
     ORDER BY ib.id_estacion;
     """
 
@@ -201,11 +210,11 @@ def render(conn):
       prefijo = "*" if es_teorico else ""
       return f"{prefijo}{litros:,.0f} L", es_teorico
 
-    # Consultar cargas programadas para HOY
+    # Consultar cargas programadas específicamente para HOY
     cargas_hoy = {}
     try:
       query_cargas = f"""
-                SELECT id_estacion, producto, volumen_programado
+                SELECT id_estacion, producto, fecha_programacion, volumen_programado
                 FROM programacion_cargas
                 WHERE fecha_programacion = '{hoy_str}';
             """
@@ -214,13 +223,14 @@ def render(conn):
         for _, rc in df_cargas.iterrows():
           est_id = str(rc["id_estacion"]).strip()
           pk = normalizar_producto(rc["producto"])
+          f_prog = str(rc["fecha_programacion"]).split("T")[0]
           vol = (
               float(rc["volumen_programado"])
               if pd.notna(rc["volumen_programado"])
               else 0.0
           )
 
-          key_carga = (est_id, pk)
+          key_carga = (est_id, pk, f_prog)
           cargas_hoy[key_carga] = cargas_hoy.get(key_carga, 0.0) + vol
     except Exception:
       try:
@@ -254,7 +264,7 @@ def render(conn):
         axis=1,
     )
 
-    # Calcular espacio disponible
+    # Calcular espacio disponible actual basado en la capacidad máxima real de tanques
     df["espacio_r"] = df.apply(
         lambda r: (
             max(0, r["cap_regular"] - r["reg_litros_calc"])
@@ -323,7 +333,7 @@ def render(conn):
       for prod, ds, litros, cap, espacio, vdp, p_key in productos:
         if cap > 0:
           str_inv_actual, _ = formato_inv(litros, f_inv)
-          vol_carga_hoy = cargas_hoy.get((est_id, p_key), 0.0)
+          vol_carga_hoy = cargas_hoy.get((est_id, p_key, hoy_str), 0.0)
 
           # 1. Alerta por Días de Suministro bajos (< 2 días)
           if pd.notna(ds) and ds < 2.0:
@@ -357,7 +367,7 @@ def render(conn):
                 "programa": programa_status,
             })
 
-          # 2. Alerta por Sobre-carga (Carga programada hoy > Espacio disponible)
+          # 2. Alerta por Sobre-carga (Carga programada hoy > Espacio disponible actual)
           if vol_carga_hoy > 0 and pd.notna(espacio) and vol_carga_hoy > espacio:
             exceso = vol_carga_hoy - espacio
             programa_status = (
