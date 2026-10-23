@@ -18,6 +18,23 @@ def normalizar_producto(producto_raw):
 
 
 def render(conn):
+  # Estilo CSS para ocultar los botones (+ / -) en los campos numéricos
+  st.markdown(
+      """
+        <style>
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+        </style>
+    """,
+      unsafe_allow_html=True,
+  )
+
   st.markdown("### 🚛 Módulo de Registro de Descargas (Bitácora)")
   st.write(
       "Registra la información detallada de las descargas físicas de combustible"
@@ -58,7 +75,7 @@ def render(conn):
       )
 
     query_estaciones = f"""
-            SELECT e.id_estacion, e.nombre, e.plaza 
+            SELECT e.id_estacion, e.nombre, e.plaza, e.tad 
             FROM estaciones e
             JOIN usuarios_estaciones ue ON e.id_estacion = ue.id_estacion
             WHERE ue.usuario = '{usuario_seleccionado}'
@@ -84,6 +101,17 @@ def render(conn):
           key="descarga_estacion_sel",
       )
       estacion_id = estacion_sel_str.split(" - ")[0]
+
+    # Obtener la TAD asociada por defecto a la estación seleccionada
+    row_estacion_sel = df_estaciones[
+        df_estaciones["id_estacion"] == estacion_id
+    ].iloc[0]
+    tad_asociada = 1
+    if pd.notna(row_estacion_sel["tad"]):
+      try:
+        tad_asociada = int(str(row_estacion_sel["tad"]).strip())
+      except ValueError:
+        tad_asociada = 1
 
     st.markdown("---")
 
@@ -160,6 +188,7 @@ def render(conn):
         tad_origen = st.number_input(
             "TAD Origen (Número):",
             min_value=1,
+            value=tad_asociada,
             step=1,
             format="%d",
             placeholder="Ej. 638",
