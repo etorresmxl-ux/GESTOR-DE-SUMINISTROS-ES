@@ -26,7 +26,7 @@ def render(conn):
   st.markdown("---")
 
   try:
-    # 1. Consultar estaciones disponibles para los selectores
+    # 1. Consultar estaciones disponibles para los selectores vinculados a la tabla estaciones
     query_est = """
             SELECT DISTINCT id_estacion, nombre, plaza 
             FROM estaciones 
@@ -52,9 +52,7 @@ def render(conn):
             placeholder="Ej. 123456",
         )
       with col2:
-        fecha_carga = st.date_input(
-            "Fecha de Carga:", value=date.today()
-        )
+        fecha_carga = st.date_input("Fecha de Carga:", value=date.today())
       with col3:
         tad_origen = st.number_input(
             "TAD Origen (Número):",
@@ -182,40 +180,22 @@ def render(conn):
     st.markdown("---")
     st.markdown("##### 🔍 Historial de Descargas Registradas")
 
-    query_historial = """
-            SELECT 
-                id,
-                num_embarque AS "Embarque",
-                fecha_carga AS "Fecha Carga",
-                tad_origen AS "TAD",
-                cliente AS "Cliente",
-                id_estacion AS "Estación",
-                producto AS "Producto",
-                vol_nat AS "Vol. Natural",
-                vol_20c AS "Vol. 20°C",
-                temperatura AS "Temp (°C)",
-                flete AS "Flete ($)",
-                remision_pemex AS "RP"
-            FROM bitacora_descargas
-            ORDER BY fecha_carga DESC, id DESC
-            LIMIT 50;
-        """
-    # Ajustamos la consulta adaptándonos a los nombres reales de las columnas creadas
     query_historial_real = """
             SELECT 
-                num_embarque AS "Embarque",
-                fecha_carga AS "Fecha",
-                tad_origen AS "TAD",
-                cliente AS "Cliente",
-                id_estacion AS "Estación",
-                producto AS "Producto",
-                volumen_nat AS "Vol. Natural (L)",
-                volumen_20c AS "Vol. 20°C (L)",
-                temperatura AS "Temp (°C)",
-                flete AS "Flete ($)",
-                remision_pemex AS "RP"
-            FROM bitacora_descargas
-            ORDER BY fecha_carga DESC, id DESC
+                bd.num_embarque AS "Embarque",
+                bd.fecha_carga AS "Fecha",
+                bd.tad_origen AS "TAD",
+                bd.cliente AS "Cliente",
+                CONCAT(e.id_estacion, ' - ', e.nombre) AS "Estación",
+                bd.producto AS "Producto",
+                bd.volumen_nat AS "Vol. Natural (L)",
+                bd.volumen_20c AS "Vol. 20°C (L)",
+                bd.temperatura AS "Temp (°C)",
+                bd.flete AS "Flete ($)",
+                bd.remision_pemex AS "RP"
+            FROM bitacora_descargas bd
+            JOIN estaciones e ON bd.id_estacion = e.id_estacion
+            ORDER BY bd.fecha_carga DESC, bd.id DESC
             LIMIT 50;
         """
     df_hist = pd.read_sql(query_historial_real, conn)
