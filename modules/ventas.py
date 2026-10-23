@@ -37,40 +37,47 @@ def render(conn):
         st.info(f"Mostrando semana del **{lunes_semana}** al **{domingo_semana}** para la estación: **{estacion_elegida}**.")
         st.markdown("---")
 
-        # 3. Validación: Revisar si la estación cuenta con producto diesel (en ventas o inventarios históricos)
-        query_diesel_check = f"""
-            SELECT 1 FROM ventas 
-            WHERE id_estacion = '{estacion_id}' AND LOWER(producto) = 'diesel'
-            LIMIT 1;
-        """
-        df_diesel = pd.read_sql(query_diesel_check, conn)
-        
-        tiene_diesel = not df_diesel.empty
-        if not tiene_diesel:
-            # Doble validación en inventarios por si acaso
-            query_inv_check = f"""
-                SELECT 1 FROM inventarios 
-                WHERE id_estacion = '{estacion_id}' AND LOWER(producto) = 'diesel'
-                LIMIT 1;
-            """
-            df_inv_d = pd.read_sql(query_inv_check, conn)
-            tiene_diesel = not df_inv_d.empty
-
-        # Definir productos válidos según la validación de diesel
-        productos_validos = ["regular", "premium"]
+        # 3. Validación: Consultar la tabla 'tanques' en Supabase para determinar los productos válidos de la estación
+        productos_validos = []
         nombres_prod_map = {
             "regular": "Regular",
-            "premium": "Premium"
+            "premium": "Premium",
+            "diesel": "Diesel"
         }
-        
-        if tiene_diesel:
-            productos_validos.append("diesel")
-            nombres_prod_map["diesel"] = "Diesel"
-            st.caption("ℹ️ Esta estación cuenta con producto **Diesel**, por lo que se incluye su columna.")
-        else:
-            st.caption("ℹ️ Esta estación **no cuenta con registro de Diesel**, por lo que se omite esa columna.")
 
-        # 4. Generar la estructura de la matriz con enteros (0) de Lunes a Domingo
+        try:
+            query_tanques = f"""
+                SELECT DISTINCT producto, capacidad_maxima 
+                FROM tanques 
+                WHERE id_estacion = '{estacion_id}';
+            """
+            df_tanques = pd.read_sql(query_tanques, conn)
+            if not df_tanques.empty:
+                for _, r_t in df_tanques.iterrows():
+                    p_raw = str(r_t['producto']).strip().lower()
+                    cap = float(r_t['capacidad_maxima']) if pd.notna(r_t['capacidad_maxima']) else 0.0
+                    if cap > 0:
+                        if 'regular' in p_raw or 'magna' in p_raw:
+                            if 'regular' not in productos_validos: productos_validos.append('regular')
+                        elif 'premium' in p_raw:
+                            if 'premium' not in productos_validos: productos_validos.append('premium')
+                        elif 'diesel' in p_raw:
+                            if 'diesel' not in productos_validos: productos_validos.append('diesel')
+        except Exception as e_tanq:
+            st.warning(f"Aviso al consultar tanques: {e_tanq}")
+
+        # Ordenar productos válidos de forma estándar
+        productos_validos = [p for p in ["regular", "premium", "diesel"] if p in productos_validos]
+        
+        # Fallback de seguridad por si la tabla tanques estuviera vacía para esta estación
+        if not productos_validos:
+            productos_validos = ["regular", "premium"]
+            st.caption("ℹ️ No se encontraron registros de tanques específicos, habilitando productos estándar (Regular, Premium).")
+        else:
+            prods_str = ", ".join([nombres_prod_map[p] for p in productos_validos])
+            st.caption(f"ℹ️ Productos habilitados según registros de tanques: **{prods_str}**.")
+
+        # 4. Generar la estructura de la matriz (Lunes a Domingo = 7 filas)
         fechas_semana = [lunes_semana + timedelta(days=i) for i in range(7)]
         nombres_dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
@@ -79,11 +86,11 @@ def render(conn):
             "Día": nombres_dias
         }
         for p in productos_validos:
-            data_matriz[nombres_prod_map[p]] = [0] * 7
+            data_matriz[nombres_prod_map[p]] = [0.0] * 7
 
         df_semanal = pd.DataFrame(data_matriz)
 
-        # 5. Validar y precargar registros existentes si ya fueron guardados previamente como enteros
+        # 5. Validar y precargar registros existentes si ya fueron guardados previamente
         query_ventas_previas = f"""
             SELECT fecha, producto, volumen 
             FROM ventas 
@@ -106,9 +113,9 @@ def render(conn):
                     if not match.empty:
                         val = match.iloc[0]["volumen"]
                         if pd.notna(val):
-                            df_semanal.loc[idx, nombres_prod_map[p]] = int(float(val))
+                            df_semanal.loc[idx, nombres_prod_map[p]] = float(val)
 
-        # 6. Tabla Matriz Interactiva dentro de un formulario con formato entero (%,d)
+        # 6. Tabla Matriz Interactiva dentro de un formulario
         st.markdown(f"#### Matriz de Ventas Semanales")
 
         column_config = {
@@ -119,7 +126,7 @@ def render(conn):
         for p in productos_validos:
             col_nombre = nombres_prod_map[p]
             column_config[col_nombre] = st.column_config.NumberColumn(
-                f"{col_nombre} (Lts)", min_value=0, format="%,d", step=100
+                f"{col_nombre} (Lts)", min_value=0.0, format="%,.2f", step=100.0
             )
 
         with st.form(f"form_ventas_semanal_{estacion_id}"):
