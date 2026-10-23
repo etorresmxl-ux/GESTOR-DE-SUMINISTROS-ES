@@ -1,6 +1,6 @@
-import streamlit as st
-import pandas as pd
 from datetime import date
+import pandas as pd
+import streamlit as st
 
 def render(conn):
     st.markdown("### 📦 Módulo de Registro de Inventarios")
@@ -27,10 +27,10 @@ def render(conn):
         with col2:
             fecha_seleccionada = st.date_input("📅 Selecciona la Fecha", date.today(), key="inv_fecha_sel")
 
-        st.info(f"Mostrando estaciones asignadas a **{usuario_seleccionado}** para la fecha: **{fecha_seleccionada}**.")
+        st.info(f"Mostrando estaciones asignadas al usuario **{usuario_seleccionado}** para la fecha: **{fecha_seleccionada}**.")
         st.markdown("---")
 
-        # 3. Obtener las estaciones correspondientes al usuario seleccionado (Uniendo estaciones y usuarios_estaciones)
+        # 3. Obtener las estaciones correspondientes al usuario seleccionado
         query_estaciones = f"""
             SELECT e.id_estacion AS "ID", e.nombre AS "Estacion", e.plaza AS "Plaza", e.tad AS "TAD"
             FROM estaciones e
@@ -44,10 +44,36 @@ def render(conn):
             st.warning(f"El usuario **{usuario_seleccionado}** no tiene estaciones asignadas actualmente.")
             return
 
-        # 4. Validar si ya existen registros previos para esta fecha y estas estaciones en la tabla 'inventarios'
         ids_estaciones = tuple(df_estaciones["ID"].tolist())
         ids_str = f"('{ids_estaciones[0]}')" if len(ids_estaciones) == 1 else str(ids_estaciones)
 
+        # Consultar la tabla 'tanques' para validar qué productos tiene cada estación
+        tanques_estaciones = {}
+        try:
+            query_tanques = f"""
+                SELECT id_estacion, producto, capacidad_maxima 
+                FROM tanques 
+                WHERE id_estacion IN {ids_str};
+            """
+            df_tanques = pd.read_sql(query_tanques, conn)
+            if not df_tanques.empty:
+                for _, rt in df_tanques.iterrows():
+                    e_id = str(rt["id_estacion"]).strip()
+                    p_raw = str(rt["producto"]).strip().lower()
+                    cap = float(rt["capacidad_maxima"]) if pd.notna(rt["capacidad_maxima"]) else 0.0
+                    if cap > 0:
+                        if e_id not in tanques_estaciones:
+                            tanques_estaciones[e_id] = set()
+                        if 'regular' in p_raw or 'magna' in p_raw:
+                            tanques_estaciones[e_id].add('regular')
+                        elif 'premium' in p_raw:
+                            tanques_estaciones[e_id].add('premium')
+                        elif 'diesel' in p_raw:
+                            tanques_estaciones[e_id].add('diesel')
+        except Exception as e_tanq:
+            st.warning(f"Aviso al consultar tanques: {e_tanq}")
+
+        # 4. Validar si ya existen registros previos para esta fecha y estas estaciones en la tabla 'inventarios'
         query_inventarios_previos = f"""
             SELECT id_estacion, producto, volumen 
             FROM inventarios 
@@ -56,27 +82,47 @@ def render(conn):
         """
         df_existentes = pd.read_sql(query_inventarios_previos, conn)
 
-        # Inicializar columnas de productos en ceros (enteros)
-        df_estaciones["Regular"] = 0
-        df_estaciones["Premium"] = 0
-        df_estaciones["Diesel"] = 0
+        # Inicializar columnas de productos aplicando validación de tanques
+        df_estaciones["Regular"] = None
+        df_estaciones["Premium"] = None
+        df_estaciones["Diesel"] = None
 
-        # Si ya hay registros previos, cargarlos en la matriz como enteros
+        for idx, row in df_estaciones.iterrows():
+            e_id = row["ID"]
+            prods_disp = tanques_estaciones.get(e_id, {"regular", "premium", "diesel"})
+            if "regular" in prods_disp:
+                df_estaciones.loc[idx, "Regular"] = 0
+            if "premium" in prods_disp:
+                df_estaciones.loc[idx, "Premium"] = 0
+            if "diesel" in prods_disp:
+                df_estaciones.loc[idx, "Diesel"] = 0
+
+        # Si ya hay registros previos, cargarlos en la matriz
         if not df_existentes.empty:
             df_existentes["producto_norm"] = df_existentes["producto"].str.lower().str.strip()
             for idx, row in df_estaciones.iterrows():
                 e_id = row["ID"]
+                prods_disp = tanques_estaciones.get(e_id, {"regular", "premium", "diesel"})
                 
                 match_reg = df_existentes[(df_existentes["id_estacion"] == e_id) & (df_existentes["producto_norm"].str.contains("regular|magna"))]
                 match_pre = df_existentes[(df_existentes["id_estacion"] == e_id) & (df_existentes["producto_norm"].str.contains("premium"))]
                 match_die = df_existentes[(df_existentes["id_estacion"] == e_id) & (df_existentes["producto_norm"].str.contains("diesel"))]
 
-                if not match_reg.empty and pd.notna(match_reg.iloc[0]["volumen"]):
-                    df_estaciones.loc[idx, "Regular"] = int(float(match_reg.iloc[0]["volumen"]))
-                if not match_pre.empty and pd.notna(match_pre.iloc[0]["volumen"]):
-                    df_estaciones.loc[idx, "Premium"] = int(float(match_pre.iloc[0]["volumen"]))
-                if not match_die.empty and pd.notna(match_die.iloc[0]["volumen"]):
-                    df_estaciones.loc[idx, "Diesel"] = int(float(match_die.iloc[0]["volumen"]))
+                if "regular" in prods_disp:
+                    if not match_reg.empty and pd.notna(match_reg.iloc[0]["volumen"]):
+                        df_estaciones.loc[idx, "Regular"] = int(float(match_reg.iloc[0]["volumen"]))
+                    else:
+                        df_estaciones.loc[idx, "Regular"] = 0
+                if "premium" in prods_disp:
+                    if not match_pre.empty and pd.notna(match_pre.iloc[0]["volumen"]):
+                        df_estaciones.loc[idx, "Premium"] = int(float(match_pre.iloc[0]["volumen"]))
+                    else:
+                        df_estaciones.loc[idx, "Premium"] = 0
+                if "diesel" in prods_disp:
+                    if not match_die.empty and pd.notna(match_die.iloc[0]["volumen"]):
+                        df_estaciones.loc[idx, "Diesel"] = int(float(match_die.iloc[0]["volumen"]))
+                    else:
+                        df_estaciones.loc[idx, "Diesel"] = 0
             
             st.success(f"📂 Se encontraron registros previos guardados para el día {fecha_seleccionada}. Puedes modificarlos directamente.")
         else:
@@ -119,17 +165,19 @@ def render(conn):
 
                 for _, row in df_editado.iterrows():
                     e_id = str(row["ID"])
+                    prods_disp = tanques_estaciones.get(e_id, {"regular", "premium", "diesel"})
                     
                     productos_data = [
-                        ("regular", float(row["Regular"])),
-                        ("premium", float(row["Premium"])),
-                        ("diesel", float(row["Diesel"]))
+                        ("regular", row["Regular"]),
+                        ("premium", row["Premium"]),
+                        ("diesel", row["Diesel"])
                     ]
 
                     for prod_nombre, vol_val in productos_data:
-                        if vol_val >= 0:
-                            cursor.execute(sql_upsert_inv, (fecha_str, e_id, prod_nombre, vol_val))
-                            count += 1
+                        if prod_nombre in prods_disp:
+                            if pd.notna(vol_val) and vol_val >= 0:
+                                cursor.execute(sql_upsert_inv, (fecha_str, e_id, prod_nombre, float(vol_val)))
+                                count += 1
 
                 conn.commit()
                 cursor.close()
