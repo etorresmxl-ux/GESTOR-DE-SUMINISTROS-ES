@@ -25,20 +25,123 @@ def render(conn):
   )
   st.markdown("---")
 
-  try:
-    # 1. Consultar estaciones disponibles para los selectores vinculados a la tabla estaciones
-    query_est = """
-            SELECT DISTINCT id_estacion, nombre, plaza 
-            FROM estaciones 
-            ORDER BY plaza, id_estacion;
-        """
-    df_estaciones = pd.read_sql(query_est, conn)
+  if conn is None:
+    st.error("No hay conexión a la base de datos.")
+    return
 
-    if df_estaciones.empty:
-      st.warning("No se encontraron estaciones registradas en el sistema.")
+  try:
+    # 1. Consultar usuarios disponibles desde 'usuarios_estaciones'
+    query_usuarios = """
+            SELECT DISTINCT usuario 
+            FROM usuarios_estaciones 
+            WHERE usuario IS NOT NULL 
+            ORDER BY usuario;
+        """
+    df_usuarios = pd.read_sql(query_usuarios, conn)
+
+    if df_usuarios.empty:
+      st.warning(
+          "No se encontraron usuarios asignados en la tabla"
+          " 'usuarios_estaciones'."
+      )
       return
 
-    # 2. Formulario de Captura de Descarga
+    lista_usuarios = df_usuarios["usuario"].tolist()
+
+    # Controles superiores: Filtro de Usuario y Estación
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+      usuario_seleccionado = st.selectbox(
+          "👤 Selecciona el Usuario:",
+          lista_usuarios,
+          key="descarga_usuario_sel",
+      )
+
+    query_estaciones = f"""
+            SELECT e.id_estacion, e.nombre, e.plaza 
+            FROM estaciones e
+            JOIN usuarios_estaciones ue ON e.id_estacion = ue.id_estacion
+            WHERE ue.usuario = '{usuario_seleccionado}'
+            ORDER BY e.plaza, e.id_estacion;
+        """
+    df_estaciones = pd.read_sql(query_estaciones, conn)
+
+    if df_estaciones.empty:
+      st.warning(
+          f"El usuario **{usuario_seleccionado}** no tiene estaciones"
+          " asignadas."
+      )
+      return
+
+    with col_f2:
+      lista_est_opciones = [
+          f"{r['id_estacion']} - {r['nombre']} ({r['plaza']})"
+          for _, r in df_estaciones.iterrows()
+      ]
+      estacion_sel_str = st.selectbox(
+          "⛽ Selecciona la Estación:",
+          lista_est_opciones,
+          key="descarga_estacion_sel",
+      )
+      estacion_id = estacion_sel_str.split(" - ")[0]
+
+    st.markdown("---")
+
+    # 2. Selector de Órdenes de Carga según la estación seleccionada
+    query_ordenes = f"""
+            SELECT id, producto, fecha_programacion, volumen_programado
+            FROM programacion_cargas
+            WHERE id_estacion = '{estacion_id}'
+            ORDER BY fecha_programacion DESC;
+        """
+    df_ordenes_prog = pd.read_sql(query_ordenes, conn)
+
+    orden_seleccionada_info = None
+    if not df_ordenes_prog.empty:
+      st.markdown("##### 🔍 Selector de Órdenes de Carga Programadas")
+      opciones_ordenes = ["(Ninguna / Captura manual libre)"] + [
+          f"Folio #{r['id']} - {r['producto']} - {r['fecha_programacion']} - {float(r['volumen_programado']):,.0f} L"
+          for _, r in df_ordenes_prog.iterrows()
+      ]
+      sel_orden_prog = st.selectbox(
+          "Selecciona una Orden de Carga para autocompletar el formulario:",
+          opciones_ordenes,
+          key="sel_orden_prog_descarga",
+      )
+
+      if sel_orden_prog != "(Ninguna / Captura manual libre)":
+        orden_id_sel = int(sel_orden_prog.split(" - ")[0].replace("Folio #", ""))
+        orden_seleccionada_info = df_ordenes_prog[
+            df_ordenes_prog["id"] == orden_id_sel
+        ].iloc[0]
+    else:
+      st.info(
+          "ℹ️ No hay órdenes de carga programadas para esta estación. Puedes"
+          " realizar un registro manual."
+      )
+
+    st.markdown("---")
+
+    # Valores por defecto basados en la orden seleccionada si existe
+    def_fecha = (
+        pd.to_datetime(orden_seleccionada_info["fecha_programacion"]).date()
+        if orden_seleccionada_info is not None
+        else date.today()
+    )
+    def_prod = (
+        normalizar_producto(orden_seleccionada_info["producto"])
+        if orden_seleccionada_info is not None
+        else "REGULAR"
+    )
+    def_vol = (
+        int(float(orden_seleccionada_info["volumen_programado"]))
+        if orden_seleccionada_info is not None
+        else 0
+    )
+    prod_indices = {"REGULAR": 0, "PREMIUM": 1, "DIESEL": 2}
+    def_prod_idx = prod_indices.get(def_prod, 0)
+
+    # 3. Formulario de Captura de Descarga
     with st.form("form_bitacora_descarga", clear_on_submit=True):
       st.markdown("##### ➕ Registrar Nueva Descarga Física")
 
@@ -52,7 +155,7 @@ def render(conn):
             placeholder="Ej. 123456",
         )
       with col2:
-        fecha_carga = st.date_input("Fecha de Carga:", value=date.today())
+        fecha_carga = st.date_input("Fecha de Carga:", value=def_fecha)
       with col3:
         tad_origen = st.number_input(
             "TAD Origen (Número):",
@@ -64,23 +167,18 @@ def render(conn):
 
       col4, col5, col6 = st.columns(3)
       with col4:
-        cliente_num = st.number_input(
-            "Cliente (Proveedor - Número):",
-            min_value=1,
-            step=1,
-            format="%d",
-            placeholder="Ej. 1",
-        )
+        cliente_opciones = ["1501350 - GAZPRO", "201549 - DAGAL"]
+        cliente_sel = st.selectbox("Cliente:", cliente_opciones)
+        cliente_num = int(cliente_sel.split(" - ")[0])
       with col5:
-        lista_est_opciones = [
-            f"{r['id_estacion']} - {r['nombre']} ({r['plaza']})"
-            for _, r in df_estaciones.iterrows()
-        ]
-        estacion_sel_str = st.selectbox("Destino (Estación):", lista_est_opciones)
-        estacion_id = estacion_sel_str.split(" - ")[0]
+        st.text_input(
+            "Destino (Estación):", value=estacion_sel_str, disabled=True
+        )
       with col6:
         producto_sel = st.selectbox(
-            "Producto:", ["REGULAR", "PREMIUM", "DIESEL"]
+            "Producto:",
+            ["REGULAR", "PREMIUM", "DIESEL"],
+            index=def_prod_idx,
         )
 
       col7, col8, col9 = st.columns(3)
@@ -88,6 +186,7 @@ def render(conn):
         volumen_nat = st.number_input(
             "Volumen al Natural (Litros):",
             min_value=1,
+            value=def_vol if def_vol > 0 else None,
             step=1,
             format="%d",
             placeholder="Ej. 20000",
@@ -96,6 +195,7 @@ def render(conn):
         volumen_20c = st.number_input(
             "Volumen a 20°C (Litros):",
             min_value=1,
+            value=def_vol if def_vol > 0 else None,
             step=1,
             format="%d",
             placeholder="Ej. 19850",
@@ -180,7 +280,7 @@ def render(conn):
     st.markdown("---")
     st.markdown("##### 🔍 Historial de Descargas Registradas")
 
-    query_historial_real = """
+    query_historial_real = f"""
             SELECT 
                 bd.num_embarque AS "Embarque",
                 bd.fecha_carga AS "Fecha",
@@ -195,13 +295,14 @@ def render(conn):
                 bd.remision_pemex AS "RP"
             FROM bitacora_descargas bd
             JOIN estaciones e ON bd.id_estacion = e.id_estacion
+            WHERE bd.id_estacion = '{estacion_id}'
             ORDER BY bd.fecha_carga DESC, bd.id DESC
             LIMIT 50;
         """
     df_hist = pd.read_sql(query_historial_real, conn)
 
     if df_hist.empty:
-      st.info("No hay registros en la bitácora de descargas aún.")
+      st.info("No hay registros en la bitácora de descargas para esta estación.")
     else:
       st.dataframe(df_hist, use_container_width=True, hide_index=True)
 
