@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 import hashlib
+import numpy as np
 import pandas as pd
 import streamlit as st
 from database import init_connection
@@ -51,18 +52,17 @@ def construir_calendario(df_ordenes, productos_estacion, hoy):
   o = df_ordenes.copy()
   o['fecha'] = pd.to_datetime(o['fecha_programacion']).dt.date
   o['prod'] = o['producto'].map(_clave_producto)
-  o['vol'] = (
-      pd.to_numeric(o['volumen_programado'], errors='coerce')
-      .fillna(0.0)
-  )
+  o['vol'] = pd.to_numeric(
+      o['volumen_programado'], errors='coerce'
+  ).fillna(0.0)
 
+  # Calcular el lunes de la semana actual
   lunes_actual = hoy - timedelta(days=hoy.weekday())
   fechas = [lunes_actual + timedelta(days=i) for i in range(14)]
 
   fuera = int((o['fecha'] > fechas[-1]).sum()) + int(
       (o['fecha'] < fechas[0]).sum()
   )
-
   con_ordenes = set(o['prod'])
   productos = [
       p for p in PRODUCTOS_ORDEN if p in productos_estacion or p in con_ordenes
@@ -103,14 +103,12 @@ def estilo_calendario(tabla):
 def confirmar_eliminacion(conn, orden_id, detalles_str):
   st.write(
       f'¿Estás seguro de que deseas eliminar permanentemente la **Orden de'
-      f' Carga #{orden_id}** ?'
+      f' Carga #{orden_id}**?'
   )
   st.caption(detalles_str)
   c_si, c_no = st.columns(2)
   with c_si:
-    if st.button(
-        'Confirmar y Eliminar', type='primary', use_container_width=True
-    ):
+    if st.button('Confirmar y Eliminar', type='primary', use_container_width=True):
       active_conn = conn
       try:
         if active_conn is None or (
@@ -150,12 +148,14 @@ def render(conn):
   if conn is None:
     st.error('No hay conexión a la base de datos.')
     return
+
   try:
+    # 1. Consultar estaciones y programadores utilizando la relación con usuarios_estaciones
     query_base = """
-        SELECT DISTINCT e.id_estacion, e.nombre AS estacion_nombre, e.tad AS proveedor, e.plaza, COALESCE(NULLIF(ue.usuario, ''), 'Sin Asignar') AS programador 
-        FROM estaciones e 
-        LEFT JOIN usuarios_estaciones ue ON e.id_estacion = ue.id_estacion 
-        ORDER BY programador, e.plaza, e.id_estacion;
+            SELECT DISTINCT e.id_estacion, e.nombre AS estacion_nombre, e.tad AS proveedor, e.plaza, COALESCE(NULLIF(ue.usuario, ''), 'Sin Asignar') AS programador
+            FROM estaciones e
+            LEFT JOIN usuarios_estaciones ue ON e.id_estacion = ue.id_estacion
+            ORDER BY programador, e.plaza, e.id_estacion;
         """
     df_estaciones = pd.read_sql(query_base, conn)
 
@@ -165,6 +165,7 @@ def render(conn):
       )
       return
 
+    # 2. Filtros Superiores de Navegación
     col_f1, col_f2 = st.columns(2)
 
     with col_f1:
@@ -196,6 +197,7 @@ def render(conn):
         df_filtrado_prog['id_estacion'] == estacion_id_sel
     ].iloc[0]
 
+    # 3. Consultar capacidades reales y productos desde la nueva tabla 'tanques' en Supabase[cite: 4]
     capacidades = {}
     productos_disponibles_estacion = set()
     try:
@@ -229,19 +231,25 @@ def render(conn):
     except Exception as e_tanques:
       st.warning(f'Aviso al consultar tanques: {e_tanques}')
 
+    # 4. Título Destacado con ID y Nombre de la Estación
     st.markdown('---')
     st.markdown(f"## ⛽ {estacion_id_sel} - {row_estacion['estacion_nombre']}")
     st.markdown('---')
 
+    # Pestañas principales del módulo
     tab_resumen, tab_gestion = st.tabs(
         ['📊 Matriz Resumen (MRP)', '📝 Gestión de Órdenes de Carga']
     )
 
+    # ==========================================
+    # PESTAÑA 1: MATRIZ RESUMEN (MRP)
+    # ==========================================
     with tab_resumen:
       st.markdown('#### Vista Consolidada a 14 Días')
       st.write(
-          'Suma de volúmenes por producto programados mediante Órdenes de Carga'
-          ' individuales.'
+          'Suma de volúmenes por producto programados mediante Órdenes de'
+          ' Carga individuales (Considerando rango de volumen operativo entre'
+          ' 5,000 L y capacidad máxima).'
       )
 
       dias_proyeccion = 14
@@ -269,6 +277,7 @@ def render(conn):
           for f in fechas
       ]
 
+      # Consultar cargas programadas sumadas por fecha y producto
       cargas_guardadas = {}
       try:
         query_cargas_db = f"""
@@ -287,6 +296,7 @@ def render(conn):
       except Exception as e:
         st.warning(f'Aviso al cargar pedidos: {e}')
 
+      # Inventario actual desde la tabla normalizada 'inventarios'[cite: 4]
       inv_actuales = {'regular': 0.0, 'premium': 0.0, 'diesel': 0.0}
       fecha_inventario = None
       try:
@@ -322,7 +332,7 @@ def render(conn):
         prefijo = '*' if es_teorico else ''
         return f'{prefijo}{litros:,.0f} L'
 
-      # Cargar VDP ponderada y factores de estacionalidad por día de la semana
+      # VDP y factores desde vistas normalizadas
       vdp_data_dict = {}
       try:
         query_vdp = f"""
@@ -331,29 +341,6 @@ def render(conn):
                     WHERE id_estacion = '{estacion_id_sel}';
                 """
         df_vdp = pd.read_sql(query_vdp, conn)
-
-        # Consultar factores específicos de estacionalidad por día si existe la vista
-        query_est_dias = f"""
-                    SELECT producto, dia_semana_num, factor_dia 
-                    FROM v_estacionalidad_dias 
-                    WHERE id_estacion = '{estacion_id_sel}';
-                """
-        df_est_dias = pd.read_sql(query_est_dias, conn)
-
-        factores_por_prod = {}
-        if not df_est_dias.empty:
-          for _, r_ed in df_est_dias.iterrows():
-            p_name_ed = str(r_ed['producto']).lower()
-            d_num = int(r_ed['dia_semana_num'])
-            f_val = (
-                float(r_ed['factor_dia'])
-                if pd.notna(r_ed['factor_dia'])
-                else 1.0
-            )
-            if p_name_ed not in factores_por_prod:
-              factores_por_prod[p_name_ed] = {}
-            factores_por_prod[p_name_ed][d_num] = f_val
-
         if not df_vdp.empty:
           for _, r in df_vdp.iterrows():
             p_name = str(r['producto']).lower()
@@ -373,13 +360,10 @@ def render(conn):
                 if pd.notna(r['vdp_ponderada'])
                 else 0.0
             )
-            # Buscar factores por día o usar 1.0 por defecto
-            factores = factores_por_prod.get(
-                prod_k, {i: 1.0 for i in range(7)}
-            )
+            factores = {i: 1.0 for i in range(7)}
             vdp_data_dict[prod_k] = {'vdp': vdp_val, 'factores': factores}
       except Exception as e:
-        st.warning(f'Aviso al consultar VDP y estacionalidad: {e}')
+        st.warning(f'Aviso al consultar VDP: {e}')
 
       productos_todos = [
           (
@@ -435,11 +419,18 @@ def render(conn):
           f_str_key = f_date.strftime('%Y-%m-%d')
           carga = cargas_guardadas.get((f_str_key, prod_key), 0.0)
 
-          # Cálculo ajustado tomando en cuenta VDP ponderada y factor del día
-          factor_dia = factores_dia.get(f_date.weekday(), 1.0)
-          vta = vdp_base * factor_dia
+          # Cálculo con rango de volumen operativo (mínimo 5,000 L, máximo capacidad_maxima)
+          vta_proyectada = vdp_base * factores_dia.get(f_date.weekday(), 1.0)
+          inv_bruto = inv_ini + carga
+          volumen_operativo = max(5000.0, min(inv_bruto, cap_max))
 
-          inv_fin = inv_ini + carga - vta
+          inventario_disponible_para_venta = volumen_operativo - 5000.0
+          if inventario_disponible_para_venta <= 0:
+            vta = 0.0
+          else:
+            vta = min(vta_proyectada, inventario_disponible_para_venta)
+
+          inv_fin = inv_bruto - vta
           inv_fin_prev = inv_fin
           ds = (inv_fin / vta) if vta > 0 else 0.0
 
@@ -454,9 +445,7 @@ def render(conn):
           ds_str = (
               f'🔴 {ds:.1f} d'
               if ds < 1.0
-              else (
-                  f'🟡 {ds:.1f} d' if ds < 2.0 else f'🟢 {ds:.1f} d'
-              )
+              else (f'🟡 {ds:.1f} d' if ds < 2.0 else f'🟢 {ds:.1f} d')
           )
 
           inv_ini_row.append(inv_ini_str)
@@ -488,15 +477,19 @@ def render(conn):
         st.dataframe(df_matriz, use_container_width=True)
         st.markdown('')
 
+    # ==========================================
+    # PESTAÑA 2: GESTIÓN DE ÓRDENES DE CARGA
+    # ==========================================
     with tab_gestion:
       st.markdown(
           '#### 📋 Alta, Modificación y Eliminación de Órdenes de Carga'
       )
       st.write(
-          'Crea órdenes independientes (soporta múltiples cargas el mismo día y'
-          ' fechas pasadas para captura de comprobantes).'
+          'Crea órdenes independientes (soporta múltiples cargas el mismo día'
+          ' y fechas pasadas para captura de comprobantes).'
       )
 
+      # Formulario de alta
       with st.form('form_crear_orden_carga', clear_on_submit=True):
         st.markdown('##### ➕ Registrar Nueva Orden de Carga')
         c1, c2, c3 = st.columns(3)
@@ -577,7 +570,9 @@ def render(conn):
               date.today(),
           )
 
-          lunes_actual = date.today() - timedelta(days=date.today().weekday())
+          lunes_actual = date.today() - timedelta(
+              days=date.today().weekday()
+          )
           fecha_por_columna = {
               c: lunes_actual + timedelta(days=i)
               for i, c in enumerate(calendario.columns)
@@ -585,7 +580,9 @@ def render(conn):
 
           ordenes_idx = df_ordenes.assign(
               _prod=df_ordenes['producto'].map(_clave_producto),
-              _fecha=pd.to_datetime(df_ordenes['fecha_programacion']).dt.date,
+              _fecha=pd.to_datetime(
+                  df_ordenes['fecha_programacion']
+              ).dt.date,
           )
           huella = hashlib.md5(
               '|'.join(calendario.to_numpy().ravel()).encode()
@@ -593,8 +590,8 @@ def render(conn):
 
           st.caption(
               'Volumen programado por semana completa (de lunes a domingo,'
-              ' incluyendo semana actual y siguiente). 👆 Haz clic en una celda'
-              ' con carga para modificarla o eliminarla.'
+              ' incluyendo semana actual y siguiente). 👆 Haz clic en una'
+              ' celda con carga para modificarla o eliminarla.'
           )
           try:
             evento = st.dataframe(
@@ -655,7 +652,9 @@ def render(conn):
                 ' semanas mostradas; consúltalas en el detalle por folio.'
             )
           with st.expander('Ver detalle por folio'):
-            st.dataframe(df_ordenes, use_container_width=True, hide_index=True)
+            st.dataframe(
+                df_ordenes, use_container_width=True, hide_index=True
+            )
 
           st.markdown('##### ⚙️ Modificar o Eliminar una Orden de Carga')
 
