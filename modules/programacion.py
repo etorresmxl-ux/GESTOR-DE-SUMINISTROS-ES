@@ -251,7 +251,7 @@ def render(conn):
     except Exception as e_tanques:
       st.warning(f"Aviso al consultar tanques: {e_tanques}")
 
-    # 4. Título con tamaño ajustado para la Estación (más pequeño que el título principal)
+    # 4. Título con tamaño ajustado para la Estación
     st.markdown("---")
     st.markdown(
         f"### ⛽ {estacion_id_sel} - {row_estacion['estacion_nombre']}"
@@ -554,7 +554,8 @@ def render(conn):
 
           st.caption(
               "Volumen programado por semana completa (lunes a domingo)."
-              " 👆 Haz clic en una celda para autoseleccionar su folio abajo."
+              " 👆 Haz clic en una celda para autoseleccionar su folio abajo (o"
+              " en una vacía para crear una nueva)."
           )
           try:
             evento = st.dataframe(
@@ -575,7 +576,12 @@ def render(conn):
               if evento is not None
               else []
           )
-          celda_clave, folios_celda = None, []
+          celda_clave, folios_celda, prod_celda, fecha_celda = (
+              None,
+              [],
+              None,
+              None,
+          )
           if celdas:
             fila_pos, col_nombre = celdas[0]
             prod_celda = str(calendario.index[fila_pos]).upper()
@@ -596,6 +602,12 @@ def render(conn):
             st.session_state["_celda_orden_procesada"] = celda_clave
             if folios_celda:
               st.session_state["folio_sel_orden"] = folios_celda[0]
+            else:
+              st.session_state["folio_sel_orden"] = (
+                  "➕ Registrar Nueva Orden de Carga"
+              )
+              st.session_state["prefill_fecha_alta"] = fecha_celda
+              st.session_state["prefill_prod_alta"] = prod_celda
 
           if fuera_de_rango:
             st.caption(
@@ -649,11 +661,18 @@ def render(conn):
         # 2. Formulario único de Alta o Modificación según la opción seleccionada
         if sel_opcion == "➕ Registrar Nueva Orden de Carga":
           st.markdown("##### ➕ Registrar Nueva Orden de Carga")
+
+          # Recuperar valores prellenados desde la celda del calendario si existen
+          val_fecha_default = st.session_state.pop(
+              "prefill_fecha_alta", date.today()
+          )
+          val_prod_default = st.session_state.pop("prefill_prod_alta", None)
+
           with st.form("form_crear_orden_uni", clear_on_submit=True):
             c1, c2, c3 = st.columns(3)
             with c1:
               sel_fecha_alta = st.date_input(
-                  "Fecha de Programación:", value=date.today()
+                  "Fecha de Programación:", value=val_fecha_default
               )
             with c2:
               prod_opciones = [
@@ -664,7 +683,14 @@ def render(conn):
               ]
               if not prod_opciones:
                 prod_opciones = ["REGULAR", "PREMIUM", "DIESEL"]
-              sel_prod_alta = st.selectbox("Producto:", prod_opciones)
+
+              idx_prod_def = 0
+              if val_prod_default in prod_opciones:
+                idx_prod_def = prod_opciones.index(val_prod_default)
+
+              sel_prod_alta = st.selectbox(
+                  "Producto:", prod_opciones, index=idx_prod_def
+              )
             with c3:
               sel_vol_alta = st.number_input(
                   "Volumen (Litros):",
