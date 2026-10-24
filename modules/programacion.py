@@ -526,7 +526,7 @@ def render(conn):
 
         if df_ordenes.empty:
           st.info("No hay órdenes de carga registradas para esta estación.")
-          opciones_gestion = ["➕ Registrar Nueva Orden de Carga"]
+          opciones_gestion = ["Registrar Nueva Orden de Carga"]
         else:
           calendario, fuera_de_rango = construir_calendario(
               df_ordenes,
@@ -604,7 +604,7 @@ def render(conn):
               st.session_state["folio_sel_orden"] = folios_celda[0]
             else:
               st.session_state["folio_sel_orden"] = (
-                  "➕ Registrar Nueva Orden de Carga"
+                  "Registrar Nueva Orden de Carga"
               )
               st.session_state["prefill_fecha_alta"] = fecha_celda
               st.session_state["prefill_prod_alta"] = prod_celda
@@ -629,7 +629,7 @@ def render(conn):
               for r in df_ordenes.itertuples()
           }
 
-          opciones_gestion = ["➕ Registrar Nueva Orden de Carga"] + [
+          opciones_gestion = ["Registrar Nueva Orden de Carga"] + [
               int(i) for i in df_ordenes["orden_carga"].tolist()
           ]
 
@@ -652,14 +652,14 @@ def render(conn):
             index=default_index,
             key="folio_sel_orden",
             format_func=lambda x: (
-                "➕ Registrar Nueva Orden de Carga"
-                if x == "➕ Registrar Nueva Orden de Carga"
+                "Registrar Nueva Orden de Carga"
+                if x == "Registrar Nueva Orden de Carga"
                 else etiquetas_ordenes.get(int(x), str(x))
             ),
         )
 
         # 2. Formulario único de Alta o Modificación según la opción seleccionada
-        if sel_opcion == "➕ Registrar Nueva Orden de Carga":
+        if sel_opcion == "Registrar Nueva Orden de Carga":
           st.markdown("##### ➕ Registrar Nueva Orden de Carga")
 
           # Recuperar valores prellenados desde la celda del calendario si existen
