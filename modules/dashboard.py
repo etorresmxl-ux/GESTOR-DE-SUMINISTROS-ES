@@ -36,68 +36,94 @@ def render(conn):
       " tanques, cargas del día y Días de Suministro (VDP Ponderada)."
   )
 
-  # Consulta utilizando inventarios, VDP y la tabla real de tanques[cite: 3, 4]
-  query = f"""
-    WITH ultimo_inventario AS (
-        SELECT 
-            id_estacion, 
-            fecha, 
-            SUM(CASE WHEN producto ILIKE '%regular%' OR producto ILIKE '%magna%' THEN volumen ELSE 0 END) as regular,
-            SUM(CASE WHEN producto ILIKE '%premium%' THEN volumen ELSE 0 END) as premium,
-            SUM(CASE WHEN producto ILIKE '%diesel%' THEN volumen ELSE 0 END) as diesel,
-            ROW_NUMBER() OVER(PARTITION BY id_estacion ORDER BY fecha DESC) as rn
-        FROM inventarios
-        GROUP BY id_estacion, fecha
-    ),
-    info_base AS (
-        SELECT DISTINCT id_estacion, tad, plaza, nombre as estacion
-        FROM estaciones
-    ),
-    vdp_resumen AS (
-        SELECT 
-            id_estacion,
-            SUM(CASE WHEN producto ILIKE '%regular%' OR producto ILIKE '%magna%' THEN vdp_ponderada ELSE 0 END) as vdp_reg,
-            SUM(CASE WHEN producto ILIKE '%premium%' THEN vdp_ponderada ELSE 0 END) as vdp_pre,
-            SUM(CASE WHEN producto ILIKE '%diesel%' THEN vdp_ponderada ELSE 0 END) as vdp_die
-        FROM v_vdp_analisis
-        GROUP BY id_estacion
-    ),
-    capacidades_tanques AS (
-        SELECT 
-            id_estacion,
-            SUM(CASE WHEN producto ILIKE '%regular%' OR producto ILIKE '%magna%' THEN capacidad_maxima ELSE 0 END) as cap_reg,
-            SUM(CASE WHEN producto ILIKE '%premium%' THEN capacidad_maxima ELSE 0 END) as cap_pre,
-            SUM(CASE WHEN producto ILIKE '%diesel%' THEN capacidad_maxima ELSE 0 END) as cap_die
-        FROM tanques
-        GROUP BY id_estacion
-    )
-    SELECT 
-        ib.id_estacion, 
-        ib.tad, 
-        ib.plaza, 
-        ib.estacion,
-        COALESCE(ct.cap_reg, 0) as cap_regular,
-        COALESCE(ct.cap_pre, 0) as cap_premium,
-        COALESCE(ct.cap_die, 0) as cap_diesel,
-        COALESCE(ui.regular, 0) as reg_litros,
-        COALESCE(ui.premium, 0) as pre_litros,
-        COALESCE(ui.diesel, 0) as die_litros,
-        ui.fecha as fecha_inventario,
-        COALESCE(vp.vdp_reg, 0) as vdp_reg,
-        COALESCE(vp.vdp_pre, 0) as vdp_pre,
-        COALESCE(vp.vdp_die, 0) as vdp_die
-    FROM info_base ib
-    LEFT JOIN ultimo_inventario ui ON ib.id_estacion = ui.id_estacion AND ui.rn = 1
-    LEFT JOIN vdp_resumen vp ON ib.id_estacion = vp.id_estacion
-    LEFT JOIN capacidades_tanques ct ON ib.id_estacion = ct.id_estacion
-    ORDER BY ib.id_estacion;
+  usuario_actual = st.session_state.get("usuario_actual", "")
+  rol_actual = st.session_state.get("rol_actual", "operador")
+
+  # Construir filtros dinámicos según el rol del usuario logueado
+  if rol_actual == "admin":
+    filtro_estaciones_cte = """
+        info_base AS (
+            SELECT DISTINCT id_estacion, tad, plaza, nombre as estacion
+            FROM estaciones
+        ),
+    """
+    where_cargas_hoy = f"WHERE fecha_programacion = '{hoy_str}'"
+    where_cargas_det = f"WHERE pc.fecha_programacion = '{hoy_str}'"
+  else:
+    filtro_estaciones_cte = f"""
+        info_base AS (
+            SELECT DISTINCT e.id_estacion, e.tad, e.plaza, e.nombre as estacion
+            FROM estaciones e
+            JOIN usuarios_estaciones ue ON e.id_estacion = ue.id_estacion
+            WHERE ue.usuario = '{usuario_actual}'
+        ),
+    """
+    where_cargas_hoy = f"""
+        WHERE fecha_programacion = '{hoy_str}' 
+        AND id_estacion IN (
+            SELECT id_estacion FROM usuarios_estaciones WHERE usuario = '{usuario_actual}'
+        )
+    """
+    where_cargas_det = f"""
+        WHERE pc.fecha_programacion = '{hoy_str}' 
+        AND pc.id_estacion IN (
+            SELECT id_estacion FROM usuarios_estaciones WHERE usuario = '{usuario_actual}'
+        )
     """
 
+  # Consulta utilizando inventarios, VDP y la tabla real de tanques filtrada por usuario[cite: 3, 4, 8]
+  query = f""" 
+    WITH ultimo_inventario AS ( 
+        SELECT id_estacion, fecha, 
+               SUM(CASE WHEN producto ILIKE '%regular%' OR producto ILIKE '%magna%' THEN volumen ELSE 0 END) as regular,
+               SUM(CASE WHEN producto ILIKE '%premium%' THEN volumen ELSE 0 END) as premium,
+               SUM(CASE WHEN producto ILIKE '%diesel%' THEN volumen ELSE 0 END) as diesel,
+               ROW_NUMBER() OVER(PARTITION BY id_estacion ORDER BY fecha DESC) as rn 
+        FROM inventarios 
+        GROUP BY id_estacion, fecha 
+    ), 
+    {filtro_estaciones_cte}
+    vdp_resumen AS ( 
+        SELECT id_estacion, 
+               SUM(CASE WHEN producto ILIKE '%regular%' OR producto ILIKE '%magna%' THEN vdp_ponderada ELSE 0 END) as vdp_reg,
+               SUM(CASE WHEN producto ILIKE '%premium%' THEN vdp_ponderada ELSE 0 END) as vdp_pre,
+               SUM(CASE WHEN producto ILIKE '%diesel%' THEN vdp_ponderada ELSE 0 END) as vdp_die 
+        FROM v_vdp_analisis 
+        GROUP BY id_estacion 
+    ), 
+    capacidades_tanques AS ( 
+        SELECT id_estacion, 
+               SUM(CASE WHEN producto ILIKE '%regular%' OR producto ILIKE '%magna%' THEN capacidad_maxima ELSE 0 END) as cap_reg,
+               SUM(CASE WHEN producto ILIKE '%premium%' THEN capacidad_maxima ELSE 0 END) as cap_pre,
+               SUM(CASE WHEN producto ILIKE '%diesel%' THEN capacidad_maxima ELSE 0 END) as cap_die 
+        FROM tanques 
+        GROUP BY id_estacion 
+    ) 
+    SELECT ib.id_estacion, ib.tad, ib.plaza, ib.estacion, 
+           COALESCE(ct.cap_reg, 0) as cap_regular, 
+           COALESCE(ct.cap_pre, 0) as cap_premium, 
+           COALESCE(ct.cap_die, 0) as cap_diesel, 
+           COALESCE(ui.regular, 0) as reg_litros, 
+           COALESCE(ui.premium, 0) as pre_litros, 
+           COALESCE(ui.diesel, 0) as die_litros, 
+           ui.fecha as fecha_inventario, 
+           COALESCE(vp.vdp_reg, 0) as vdp_reg, 
+           COALESCE(vp.vdp_pre, 0) as vdp_pre, 
+           COALESCE(vp.vdp_die, 0) as vdp_die 
+    FROM info_base ib 
+    LEFT JOIN ultimo_inventario ui ON ib.id_estacion = ui.id_estacion AND ui.rn = 1 
+    LEFT JOIN vdp_resumen vp ON ib.id_estacion = vp.id_estacion 
+    LEFT JOIN capacidades_tanques ct ON ib.id_estacion = ct.id_estacion 
+    ORDER BY ib.id_estacion; 
+    """
   try:
     df = pd.read_sql(query, conn)
 
     if df.empty:
-      st.warning("No hay datos suficientes para generar el resumen.")
+      st.warning(
+          "No hay datos suficientes para generar el resumen o no tienes"
+          " estaciones asignadas."
+      )
       return
 
     # 1. Consultar descargas reales de forma segura
@@ -206,13 +232,13 @@ def render(conn):
       prefijo = "*" if es_teorico else ""
       return f"{prefijo}{litros:,.0f} L", es_teorico
 
-    # Consultar cargas programadas específicamente para HOY
+    # Consultar cargas programadas específicamente para HOY (filtrado por usuario)
     cargas_hoy = {}
     try:
       query_cargas = f"""
             SELECT id_estacion, producto, fecha_programacion, volumen_programado
             FROM programacion_cargas
-            WHERE fecha_programacion = '{hoy_str}';
+            {where_cargas_hoy};
         """
       df_cargas = pd.read_sql(query_cargas, conn)
       if not df_cargas.empty:
@@ -337,7 +363,9 @@ def render(conn):
           if pd.notna(ds) and ds < 2.0:
             prioridad = 1 if ds < 1.0 else 2
             nivel = (
-                "🔴 CRÍTICO (< 1 Día)" if ds < 1.0 else "🟡 ADVERTENCIA (< 2 Días)"
+                "🔴 CRÍTICO (< 1 Día)"
+                if ds < 1.0
+                else "🟡 ADVERTENCIA (< 2 Días)"
             )
 
             if vol_carga_hoy > 0:
@@ -420,7 +448,10 @@ def render(conn):
     else:
       inv_ordenadas = sorted(
           alertas_inventario,
-          key=lambda x: (x["prioridad"], x["ds"] if pd.notna(x["ds"]) else 999.0),
+          key=lambda x: (
+              x["prioridad"],
+              x["ds"] if pd.notna(x["ds"]) else 999.0,
+          ),
       )
       df_inv_alertas = pd.DataFrame(inv_ordenadas)
 
@@ -505,14 +536,15 @@ def render(conn):
                 FROM usuarios_estaciones 
                 GROUP BY id_estacion
             ) ue ON e.id_estacion = ue.id_estacion
-            WHERE pc.fecha_programacion = '{hoy_str}'
+            {where_cargas_det}
             ORDER BY usuario, e.plaza, e.id_estacion, pc.producto;
         """
       df_prog_hoy = pd.read_sql(query_cargas_hoy_det, conn)
 
       if df_prog_hoy.empty:
         st.info(
-            f"📅 No hay cargas programadas para el día de hoy ({hoy_str})."
+            f"📅 No hay cargas programadas para el día de hoy ({hoy_str}) en"
+            " tus estaciones asignadas."
         )
       else:
         tad_dict = {
