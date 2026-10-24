@@ -18,18 +18,18 @@ def normalizar_producto(producto_raw):
 
 
 def render(conn):
-  # Estilo CSS para ocultar los botones (+ / -) en los campos numéricos
+  # --- Estilo CSS para ocultar los botones (+ / -) en los campos numéricos ---
   st.markdown(
       """
         <style>
-        input[type="number"]::-webkit-inner-spin-button,
-        input[type="number"]::-webkit-outer-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-        }
-        input[type="number"] {
-            -moz-appearance: textfield;
-        }
+            input[type="number"]::-webkit-inner-spin-button,
+            input[type="number"]::-webkit-outer-spin-button {
+                -webkit-appearance: none;
+                margin: 0;
+            }
+            input[type="number"] {
+                -moz-appearance: textfield;
+            }
         </style>
     """,
       unsafe_allow_html=True,
@@ -46,33 +46,33 @@ def render(conn):
     st.error("No hay conexión a la base de datos.")
     return
 
+  usuario_actual = st.session_state.get("usuario_actual", "")
+  rol_actual = st.session_state.get("rol_actual", "operador")
+
   try:
-    # 1. Consultar usuarios disponibles desde 'usuarios_estaciones'
-    query_usuarios = """
-            SELECT DISTINCT usuario 
-            FROM usuarios_estaciones 
-            WHERE usuario IS NOT NULL 
-            ORDER BY usuario;
-        """
-    df_usuarios = pd.read_sql(query_usuarios, conn)
-
-    if df_usuarios.empty:
-      st.warning(
-          "No se encontraron usuarios asignados en la tabla"
-          " 'usuarios_estaciones'."
-      )
-      return
-
-    lista_usuarios = df_usuarios["usuario"].tolist()
-
-    # Controles superiores: Filtro de Usuario y Estación
+    # 1. Controles superiores adaptados según el rol del usuario
     col_f1, col_f2 = st.columns(2)
+
     with col_f1:
-      usuario_seleccionado = st.selectbox(
-          "👤 Selecciona el Usuario:",
-          lista_usuarios,
-          key="descarga_usuario_sel",
-      )
+      if rol_actual == "admin":
+        query_usuarios = "SELECT DISTINCT usuario FROM usuarios_estaciones WHERE usuario IS NOT NULL ORDER BY usuario;"
+        df_usuarios = pd.read_sql(query_usuarios, conn)
+        lista_usuarios = (
+            df_usuarios["usuario"].tolist() if not df_usuarios.empty else []
+        )
+        usuario_seleccionado = st.selectbox(
+            "👤 Selecciona el Usuario:",
+            lista_usuarios,
+            key="descarga_usuario_sel",
+        )
+      else:
+        usuario_seleccionado = usuario_actual
+        st.text_input(
+            "👤 Usuario:",
+            value=usuario_seleccionado,
+            disabled=True,
+            key="descarga_usuario_text_disabled",
+        )
 
     query_estaciones = f"""
             SELECT e.id_estacion, e.nombre, e.plaza, e.tad 
@@ -138,7 +138,9 @@ def render(conn):
       )
 
       if sel_orden_prog != "(Ninguna / Captura manual libre)":
-        orden_id_sel = int(sel_orden_prog.split(" - ")[0].replace("Folio #", ""))
+        orden_id_sel = int(
+            sel_orden_prog.split(" - ")[0].replace("Folio #", "")
+        )
         orden_seleccionada_info = df_ordenes_prog[
             df_ordenes_prog["id"] == orden_id_sel
         ].iloc[0]
@@ -152,7 +154,9 @@ def render(conn):
 
     # Valores por defecto basados en la orden seleccionada si existe
     def_fecha = (
-        pd.to_datetime(orden_seleccionada_info["fecha_programacion"]).date()
+        pd.to_datetime(
+            orden_seleccionada_info["fecha_programacion"]
+        ).date()
         if orden_seleccionada_info is not None
         else date.today()
     )
@@ -331,7 +335,9 @@ def render(conn):
     df_hist = pd.read_sql(query_historial_real, conn)
 
     if df_hist.empty:
-      st.info("No hay registros en la bitácora de descargas para esta estación.")
+      st.info(
+          "No hay registros en la bitácora de descargas para esta estación."
+      )
     else:
       st.dataframe(df_hist, use_container_width=True, hide_index=True)
 
