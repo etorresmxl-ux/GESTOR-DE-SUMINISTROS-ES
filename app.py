@@ -18,16 +18,24 @@ st.set_page_config(
     page_title="Gestión de Suministro - Gasolineras",
     page_icon="⛽",
     layout="wide",
-    initial_sidebar_state="auto",  # 'auto' contrae la barra lateral automáticamente en pantallas móviles[cite: 11]
+    initial_sidebar_state="auto",  # 'auto' contrae la barra lateral automáticamente en pantallas móviles[cite: 1, 11]
 )
 
-# --- Inyección de Estilos CSS Globales para Reducir Espacios y Optimizar Móviles ---
+# --- Inyección de Estilos CSS Globales para Reducir Espacios y Evitar Cortes ---
 st.markdown(
     """
     <style>
-    /* Reducir el espacio inferior de los títulos y encabezados */
-    h1, h2, h3, h4, h5, h6 {
-        margin-top: 0.2rem !important;
+    /* Dar un respiro seguro a los títulos principales para que no se corten arriba */
+    h1, h2, h3 {
+        margin-top: 0.8rem !important;
+        margin-bottom: 0.3rem !important;
+        padding-top: 0rem !important;
+        padding-bottom: 0rem !important;
+    }
+
+    /* Reducir el espacio inferior de encabezados menores */
+    h4, h5, h6 {
+        margin-top: 0.4rem !important;
         margin-bottom: 0.2rem !important;
         padding-top: 0rem !important;
         padding-bottom: 0rem !important;
@@ -47,7 +55,7 @@ st.markdown(
 
     /* Compactar el espaciado interior de los contenedores principales de Streamlit */
     .block-container {
-        padding-top: 2rem !important;
+        padding-top: 1.5rem !important;
         padding-bottom: 1rem !important;
     }
 
