@@ -772,4 +772,24 @@ def render(conn):
                 f_str_u = nueva_fecha.strftime("%Y-%m-%d")
                 q_upd = f"""
                                     UPDATE programacion_cargas 
-                                    SET volumen_programado = {nuevo_vol}, fecha_programacion = '{f_str_
+                                    SET volumen_programado = {nuevo_vol}, fecha_programacion = '{f_str_u}', producto = '{nuevo_prod}'
+                                    WHERE id = {sel_orden_id};
+                                """
+                cursor.execute(q_upd)
+                conn.commit()
+                cursor.close()
+                st.session_state["mensaje_exito_orden"] = (
+                    f"✅ Orden de Carga #{sel_orden_id} actualizada"
+                    " correctamente."
+                )
+                st.rerun()
+              except Exception as e_upd:
+                conn.rollback()
+                cursor.close()
+                st.error(f"Error al actualizar: {e_upd}")
+
+      except Exception as e_ord:
+        st.warning(f"Error al consultar las órdenes de carga: {e_ord}")
+
+  except Exception as e:
+    st.error(f"Error en la matriz de programación: {e}")
