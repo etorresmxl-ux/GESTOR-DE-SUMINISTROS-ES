@@ -13,12 +13,37 @@ from modules import (
 )
 import streamlit as st
 
-# --- Configuración inicial de la página ---
+# --- Configuración inicial de la página y diseño responsivo móvil ---
 st.set_page_config(
     page_title="Gestión de Suministro - Gasolineras",
     page_icon="⛽",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",  # 'auto' contrae la barra lateral automáticamente en pantallas móviles
+)
+
+# --- Inyección de Estilos CSS Globales para Optimización en Dispositivos Móviles ---
+st.markdown(
+    """
+    <style>
+    /* Ajustes específicos para pantallas pequeñas (Smartphones y Tablets) */
+    @media (max-width: 768px) {
+        /* Botones de ancho completo para facilitar el toque táctil */
+        .stButton button {
+            width: 100% !important;
+        }
+        /* Reducir ligeramente el tamaño del texto en tablas para mejor ajuste visual */
+        .stDataFrame {
+            font-size: 12px !important;
+        }
+        /* Minimizar los márgenes laterales del contenedor principal para aprovechar la pantalla */
+        .block-container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 # Inicializar conexión a base de datos
