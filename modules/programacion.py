@@ -138,7 +138,7 @@ def confirmar_eliminacion(conn, orden_id, detalles_str):
 
 
 def render(conn):
-  st.markdown("## 🚛 Matriz de Programación y Gestión de Órdenes")
+  st.markdown("### 🚛 Matriz de Programación y Gestión de Órdenes")
   st.write(
       "Administra de forma independiente cada Orden de Carga (Folio) y"
       " visualiza el resumen consolidado a 14 días."
