@@ -25,10 +25,16 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* Dar un respiro seguro a los títulos principales para que no se corten arriba */
+    /* Dar un respiro seguro al contenedor principal para que los títulos nunca se corten */
+    .block-container {
+        padding-top: 2.5rem !important;
+        padding-bottom: 1.5rem !important;
+    }
+
+    /* Ajustar los márgenes de los títulos principales */
     h1, h2, h3 {
-        margin-top: 0.8rem !important;
-        margin-bottom: 0.3rem !important;
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.4rem !important;
         padding-top: 0rem !important;
         padding-bottom: 0rem !important;
     }
@@ -53,12 +59,6 @@ st.markdown(
         margin-bottom: 0.8rem !important;
     }
 
-    /* Compactar el espaciado interior de los contenedores principales de Streamlit */
-    .block-container {
-        padding-top: 1.5rem !important;
-        padding-bottom: 1rem !important;
-    }
-
     /* Ajustes específicos para pantallas pequeñas (Smartphones y Tablets) */
     @media (max-width: 768px) {
         /* Botones de ancho completo para facilitar el toque táctil */
@@ -73,6 +73,7 @@ st.markdown(
         .block-container {
             padding-left: 1rem !important;
             padding-right: 1rem !important;
+            padding-top: 2rem !important;
         }
     }
     </style>
