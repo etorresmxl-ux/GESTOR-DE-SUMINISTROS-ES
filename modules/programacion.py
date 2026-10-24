@@ -1,9 +1,9 @@
 from datetime import date, timedelta
+from database import init_connection
 import hashlib
 import numpy as np
 import pandas as pd
 import streamlit as st
-from database import init_connection
 
 DIAS_SEMANA = ["lun.", "mar.", "mié.", "jue.", "vie.", "sáb.", "dom."]
 MESES = [
@@ -52,9 +52,9 @@ def construir_calendario(df_ordenes, productos_estacion, hoy):
   o = df_ordenes.copy()
   o["fecha"] = pd.to_datetime(o["fecha_programacion"]).dt.date
   o["prod"] = o["producto"].map(_clave_producto)
-  o["vol"] = pd.to_numeric(
-      o["volumen_programado"], errors="coerce"
-  ).fillna(0.0)
+  o["vol"] = (
+      pd.to_numeric(o["volumen_programado"], errors="coerce").fillna(0.0)
+  )
 
   lunes_actual = hoy - timedelta(days=hoy.weekday())
   fechas = [lunes_actual + timedelta(days=i) for i in range(14)]
@@ -131,13 +131,14 @@ def confirmar_eliminacion(conn, orden_id, detalles_str):
         except Exception:
           pass
         st.error(f"Error al eliminar: {e_del}")
+
   with c_no:
     if st.button("Cancelar", use_container_width=True):
       st.rerun()
 
 
 def render(conn):
-  st.markdown("### 🚛 Matriz de Programación y Gestión de Órdenes")
+  st.markdown("## 🚛 Matriz de Programación y Gestión de Órdenes")
   st.write(
       "Administra de forma independiente cada Orden de Carga (Folio) y"
       " visualiza el resumen consolidado a 14 días."
@@ -154,16 +155,16 @@ def render(conn):
     # 1. Consultar estaciones filtrando automáticamente según el rol del usuario
     if rol_actual == "admin":
       query_base = """
-                SELECT DISTINCT e.id_estacion, e.nombre AS estacion_nombre, e.tad AS proveedor, e.plaza, COALESCE(NULLIF(ue.usuario, ''), 'Sin Asignar') AS programador 
-                FROM estaciones e 
-                LEFT JOIN usuarios_estaciones ue ON e.id_estacion = ue.id_estacion 
+                SELECT DISTINCT e.id_estacion, e.nombre AS estacion_nombre, e.tad AS proveedor, e.plaza, COALESCE(NULLIF(ue.usuario, ''), 'Sin Asignar') AS programador
+                FROM estaciones e
+                LEFT JOIN usuarios_estaciones ue ON e.id_estacion = ue.id_estacion
                 ORDER BY programador, e.plaza, e.id_estacion;
             """
     else:
       query_base = f"""
-                SELECT DISTINCT e.id_estacion, e.nombre AS estacion_nombre, e.tad AS proveedor, e.plaza, ue.usuario AS programador 
-                FROM estaciones e 
-                JOIN usuarios_estaciones ue ON e.id_estacion = ue.id_estacion 
+                SELECT DISTINCT e.id_estacion, e.nombre AS estacion_nombre, e.tad AS proveedor, e.plaza, ue.usuario AS programador
+                FROM estaciones e
+                JOIN usuarios_estaciones ue ON e.id_estacion = ue.id_estacion
                 WHERE ue.usuario = '{usuario_actual}'
                 ORDER BY e.plaza, e.id_estacion;
             """
@@ -181,13 +182,17 @@ def render(conn):
 
     with col_f1:
       if rol_actual == "admin":
-        programadores_disponibles = sorted(df_estaciones["programador"].unique())
+        programadores_disponibles = sorted(
+            df_estaciones["programador"].unique()
+        )
         selected_prog = st.selectbox(
             "Programador / Usuario:", programadores_disponibles
         )
       else:
         selected_prog = usuario_actual
-        st.text_input("Programador / Usuario:", value=selected_prog, disabled=True)
+        st.text_input(
+            "Programador / Usuario:", value=selected_prog, disabled=True
+        )
 
     df_filtrado_prog = df_estaciones[
         df_estaciones["programador"] == selected_prog
@@ -246,9 +251,11 @@ def render(conn):
     except Exception as e_tanques:
       st.warning(f"Aviso al consultar tanques: {e_tanques}")
 
-    # 4. Título Destacado con ID y Nombre de la Estación
+    # 4. Título con tamaño ajustado para la Estación (más pequeño que el título principal)
     st.markdown("---")
-    st.markdown(f"## ⛽ {estacion_id_sel} - {row_estacion['estacion_nombre']}")
+    st.markdown(
+        f"### ⛽ {estacion_id_sel} - {row_estacion['estacion_nombre']}"
+    )
     st.markdown("---")
 
     # Pestañas principales del módulo
@@ -292,7 +299,6 @@ def render(conn):
           for f in fechas
       ]
 
-      # Consultar cargas programadas sumadas por fecha y producto
       cargas_guardadas = {}
       try:
         query_cargas_db = f"""
@@ -311,7 +317,6 @@ def render(conn):
       except Exception as e:
         st.warning(f"Aviso al cargar pedidos: {e}")
 
-      # Inventario actual desde la tabla normalizada 'inventarios'[cite: 4]
       inv_actuales = {"regular": 0.0, "premium": 0.0, "diesel": 0.0}
       fecha_inventario = None
       try:
@@ -347,7 +352,6 @@ def render(conn):
         prefijo = "*" if es_teorico else ""
         return f"{prefijo}{litros:,.0f} L"
 
-      # VDP y factores desde vistas normalizadas
       vdp_data_dict = {}
       try:
         query_vdp = f"""
@@ -403,14 +407,14 @@ def render(conn):
 
         st.markdown(f"#### {prod_title_html}", unsafe_allow_html=True)
 
-        inv_ini_row, espacio_disp_row, carga_row, vta_row, inv_fin_row, ds_row = (
-            [],
-            [],
-            [],
-            [],
-            [],
-            [],
-        )
+        (
+            inv_ini_row,
+            espacio_disp_row,
+            carga_row,
+            vta_row,
+            inv_fin_row,
+            ds_row,
+        ) = ([], [], [], [], [], [])
         inv_actual = inv_actuales.get(prod_key, 0.0)
         prod_info = vdp_data_dict.get(
             prod_key, {"vdp": 0.0, "factores": {i: 1.0 for i in range(7)}}
@@ -434,7 +438,6 @@ def render(conn):
           f_str_key = f_date.strftime("%Y-%m-%d")
           carga = cargas_guardadas.get((f_str_key, prod_key), 0.0)
 
-          # Cálculo con rango de volumen operativo (mínimo 5,000 L, máximo capacidad_maxima)
           vta_proyectada = vdp_base * factores_dia.get(f_date.weekday(), 1.0)
           inv_bruto = inv_ini + carga
           volumen_operativo = max(5000.0, min(inv_bruto, cap_max))
@@ -497,75 +500,17 @@ def render(conn):
     # ==========================================
     with tab_gestion:
       st.markdown(
-          "#### 📋 Alta, Modificación y Eliminación de Órdenes de Carga"
+          "#### 📋 Gestión, Alta, Modificación y Eliminación de Órdenes de"
+          " Carga"
       )
       st.write(
-          "Crea órdenes independientes (soporta múltiples cargas el mismo día"
-          " y fechas pasadas para captura de comprobantes)."
+          "Consulta el calendario de cargas registradas y administra"
+          " individualmente cada orden mediante el selector unificado."
       )
-
-      # Formulario de alta
-      with st.form("form_crear_orden_carga", clear_on_submit=True):
-        st.markdown("##### ➕ Registrar Nueva Orden de Carga")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-          sel_fecha_alta = st.date_input(
-              "Fecha de Programación:", value=date.today()
-          )
-        with c2:
-          prod_opciones = [
-              p[0]
-              for p in productos_todos
-              if p[1] in productos_disponibles_estacion
-              or capacidades.get(p[1], 0.0) > 0
-          ]
-          if not prod_opciones:
-            prod_opciones = ["REGULAR", "PREMIUM", "DIESEL"]
-          sel_prod_alta = st.selectbox("Producto:", prod_opciones)
-        with c3:
-          sel_vol_alta = st.number_input(
-              "Volumen (Litros):",
-              min_value=1,
-              value=None,
-              step=1,
-              format="%d",
-              placeholder="Ingresa el volumen...",
-          )
-
-        submitted_alta = st.form_submit_button("🚀 Generar Orden de Carga")
-        if submitted_alta:
-          if sel_vol_alta is None or sel_vol_alta <= 0:
-            st.warning(
-                "⚠️ Por favor ingresa un volumen válido mayor a 0 litros."
-            )
-          else:
-            cursor = conn.cursor()
-            try:
-              f_str = sel_fecha_alta.strftime("%Y-%m-%d")
-              insert_query = f"""
-                                INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado)
-                                VALUES ('{estacion_id_sel}', '{sel_prod_alta}', '{f_str}', {sel_vol_alta});
-                            """
-              cursor.execute(insert_query)
-              conn.commit()
-              cursor.close()
-
-              st.session_state["mensaje_exito_orden"] = (
-                  f"✅ ¡Orden de Carga registrada exitosamente! ({sel_prod_alta}"
-                  f" - {sel_vol_alta:,.0f} L para {f_str})"
-              )
-              st.rerun()
-            except Exception as err:
-              conn.rollback()
-              cursor.close()
-              st.error(f"Error al registrar la orden: {err}")
 
       if "mensaje_exito_orden" in st.session_state:
         st.success(st.session_state["mensaje_exito_orden"])
         del st.session_state["mensaje_exito_orden"]
-
-      st.markdown("---")
-      st.markdown("##### 🔍 Órdenes de Carga Registradas")
 
       try:
         query_tabla_ordenes = f"""
@@ -576,8 +521,12 @@ def render(conn):
                 """
         df_ordenes = pd.read_sql(query_tabla_ordenes, conn)
 
+        # 1. Mostrar la tabla de Órdenes de Carga Registradas (Calendario) primero
+        st.markdown("##### 🔍 Órdenes de Carga Registradas")
+
         if df_ordenes.empty:
           st.info("No hay órdenes de carga registradas para esta estación.")
+          opciones_gestion = ["➕ Registrar Nueva Orden de Carga"]
         else:
           calendario, fuera_de_rango = construir_calendario(
               df_ordenes,
@@ -604,9 +553,8 @@ def render(conn):
           ).hexdigest()[:8]
 
           st.caption(
-              "Volumen programado por semana completa (de lunes a domingo,"
-              " incluyendo semana actual y siguiente). 👆 Haz clic en una"
-              " celda con carga para modificarla o eliminarla."
+              "Volumen programado por semana completa (lunes a domingo)."
+              " 👆 Haz clic en una celda para autoseleccionar su folio abajo."
           )
           try:
             evento = st.dataframe(
@@ -618,7 +566,9 @@ def render(conn):
             )
           except Exception:
             evento = None
-            st.dataframe(estilo_calendario(calendario), use_container_width=True)
+            st.dataframe(
+                estilo_calendario(calendario), use_container_width=True
+            )
 
           celdas = (
               ((evento.get("selection") or {}).get("cells") or [])
@@ -647,35 +597,17 @@ def render(conn):
             if folios_celda:
               st.session_state["folio_sel_orden"] = folios_celda[0]
 
-          if celda_clave is not None:
-            if not folios_celda:
-              st.info("No hay cargas en esa celda.")
-            elif len(folios_celda) == 1:
-              st.info(
-                  f"✏️ Orden #{folios_celda[0]} lista en el formulario de"
-                  " modificación (abajo)."
-              )
-            else:
-              lista = ", ".join(f"#{f}" for f in folios_celda)
-              st.info(
-                  f"✏️ Hay {len(folios_celda)} órdenes en esa celda ({lista})."
-                  " Elige cuál modificar en el selector de folio (abajo)."
-              )
           if fuera_de_rango:
             st.caption(
                 f"Hay {fuera_de_rango} orden(es) más allá del rango de las 2"
-                " semanas mostradas; consúltalas en el detalle por folio."
+                " semanas mostradas."
             )
+
           with st.expander("Ver detalle por folio"):
             st.dataframe(
                 df_ordenes, use_container_width=True, hide_index=True
             )
 
-          st.markdown("##### ⚙️ Modificar o Eliminar una Orden de Carga")
-
-          ids_disponibles = [int(i) for i in df_ordenes["orden_carga"].tolist()]
-          if st.session_state.get("folio_sel_orden") not in ids_disponibles:
-            st.session_state["folio_sel_orden"] = ids_disponibles[0]
           etiquetas_ordenes = {
               int(r.orden_carga): (
                   f"#{int(r.orden_carga)} · {r.producto} · "
@@ -685,21 +617,106 @@ def render(conn):
               for r in df_ordenes.itertuples()
           }
 
-          col_id_sel, col_btn_del = st.columns(
-              [3, 1], vertical_alignment="bottom"
-          )
-          with col_id_sel:
-            sel_orden_id = st.selectbox(
-                "Selecciona el Folio (Orden de Carga) a administrar:",
-                ids_disponibles,
-                key="folio_sel_orden",
-                format_func=lambda i: etiquetas_ordenes.get(int(i), str(i)),
-            )
+          opciones_gestion = ["➕ Registrar Nueva Orden de Carga"] + [
+              int(i) for i in df_ordenes["orden_carga"].tolist()
+          ]
 
+        st.markdown("---")
+        st.markdown("##### ⚙️ Formulario de Alta, Modificación o Eliminación")
+
+        # Mantener selección si existe en session_state
+        default_index = 0
+        if (
+            "folio_sel_orden" in st.session_state
+            and st.session_state["folio_sel_orden"] in opciones_gestion
+        ):
+          default_index = opciones_gestion.index(
+              st.session_state["folio_sel_orden"]
+          )
+
+        sel_opcion = st.selectbox(
+            "Selecciona acción o Folio a administrar:",
+            opciones_gestion,
+            index=default_index,
+            key="folio_sel_orden",
+            format_func=lambda x: (
+                "➕ Registrar Nueva Orden de Carga"
+                if x == "➕ Registrar Nueva Orden de Carga"
+                else etiquetas_ordenes.get(int(x), str(x))
+            ),
+        )
+
+        # 2. Formulario único de Alta o Modificación según la opción seleccionada
+        if sel_opcion == "➕ Registrar Nueva Orden de Carga":
+          st.markdown("##### ➕ Registrar Nueva Orden de Carga")
+          with st.form("form_crear_orden_uni", clear_on_submit=True):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+              sel_fecha_alta = st.date_input(
+                  "Fecha de Programación:", value=date.today()
+              )
+            with c2:
+              prod_opciones = [
+                  p[0]
+                  for p in productos_todos
+                  if p[1] in productos_disponibles_estacion
+                  or capacidades.get(p[1], 0.0) > 0
+              ]
+              if not prod_opciones:
+                prod_opciones = ["REGULAR", "PREMIUM", "DIESEL"]
+              sel_prod_alta = st.selectbox("Producto:", prod_opciones)
+            with c3:
+              sel_vol_alta = st.number_input(
+                  "Volumen (Litros):",
+                  min_value=1,
+                  value=None,
+                  step=1,
+                  format="%d",
+                  placeholder="Ingresa el volumen...",
+              )
+
+            submitted_alta = st.form_submit_button(
+                "🚀 Generar Orden de Carga", use_container_width=True
+            )
+            if submitted_alta:
+              if sel_vol_alta is None or sel_vol_alta <= 0:
+                st.warning(
+                    "⚠️ Por favor ingresa un volumen válido mayor a 0 litros."
+                )
+              else:
+                cursor = conn.cursor()
+                try:
+                  f_str = sel_fecha_alta.strftime("%Y-%m-%d")
+                  insert_query = f"""
+                                        INSERT INTO programacion_cargas (id_estacion, producto, fecha_programacion, volumen_programado)
+                                        VALUES ('{estacion_id_sel}', '{sel_prod_alta}', '{f_str}', {sel_vol_alta});
+                                    """
+                  cursor.execute(insert_query)
+                  conn.commit()
+                  cursor.close()
+
+                  st.session_state["mensaje_exito_orden"] = (
+                      f"✅ ¡Orden de Carga registrada exitosamente!"
+                      f" ({sel_prod_alta} - {sel_vol_alta:,.0f} L para {f_str})"
+                  )
+                  st.rerun()
+                except Exception as err:
+                  conn.rollback()
+                  cursor.close()
+                  st.error(f"Error al registrar la orden: {err}")
+        else:
+          sel_orden_id = int(sel_opcion)
           row_orden_act = df_ordenes[
               df_ordenes["orden_carga"] == sel_orden_id
           ].iloc[0]
 
+          col_info, col_btn_del = st.columns(
+              [3, 1], vertical_alignment="bottom"
+          )
+          with col_info:
+            st.markdown(
+                f"##### ✏️ Modificar o Eliminar Orden de Carga #{sel_orden_id}"
+            )
           with col_btn_del:
             if st.button(
                 "🗑️ Eliminar Orden",
@@ -714,7 +731,7 @@ def render(conn):
 
           sufijo_form = f"{sel_orden_id}_{row_orden_act['volumen_programado']}_{row_orden_act['fecha_programacion']}_{row_orden_act['producto']}"
 
-          with st.form("form_editar_orden"):
+          with st.form("form_editar_orden_uni"):
             ce1, ce2, ce3 = st.columns(3)
             with ce1:
               nueva_fecha = st.date_input(
@@ -755,24 +772,4 @@ def render(conn):
                 f_str_u = nueva_fecha.strftime("%Y-%m-%d")
                 q_upd = f"""
                                     UPDATE programacion_cargas 
-                                    SET volumen_programado = {nuevo_vol}, fecha_programacion = '{f_str_u}', producto = '{nuevo_prod}'
-                                    WHERE id = {sel_orden_id};
-                                """
-                cursor.execute(q_upd)
-                conn.commit()
-                cursor.close()
-                st.session_state["mensaje_exito_orden"] = (
-                    f"✅ Orden de Carga #{sel_orden_id} actualizada"
-                    " correctamente."
-                )
-                st.rerun()
-              except Exception as e_upd:
-                conn.rollback()
-                cursor.close()
-                st.error(f"Error al actualizar: {e_upd}")
-
-      except Exception as e_ord:
-        st.warning(f"Error al consultar las órdenes de carga: {e_ord}")
-
-  except Exception as e:
-    st.error(f"Error en la matriz de programación: {e}")
+                                    SET volumen_programado = {nuevo_vol}, fecha_programacion = '{f_str_
