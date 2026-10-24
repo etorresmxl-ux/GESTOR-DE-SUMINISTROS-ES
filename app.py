@@ -39,23 +39,33 @@ else:
 
   # --- BARRA LATERAL DE NAVEGACIÓN (Solo se dibuja si ya inició sesión) ---
   st.sidebar.markdown("## ⛽ Gestión de Suministro")
-  st.sidebar.markdown(f"👤 **Usuario:** {usuario_logueado} (`{rol_logueado}`)")
+  st.sidebar.markdown(f"👤  **Usuario:**  {usuario_logueado} ({rol_logueado})")
   st.sidebar.markdown("---")
   st.sidebar.markdown("### Navegación")
 
-  menu = st.sidebar.radio(
-      "Selecciona un módulo:",
-      [
-          "Dashboard",
-          "Programación (MRP)",
-          "Inventarios",
-          "Ventas",
-          "Descargas",
-          "Reportes",
-          "Importador de Datos",
-          "Herramientas de Datos",
-      ],
-  )
+  # Definir módulos disponibles según el rol del usuario
+  if rol_logueado == "admin":
+    opciones_menu = [
+        "Dashboard",
+        "Programación (MRP)",
+        "Inventarios",
+        "Ventas",
+        "Descargas",
+        "Reportes",
+        "Importador de Datos",
+        "Herramientas de Datos",
+    ]
+  else:
+    # Menú restringido exclusivamente para operadores
+    opciones_menu = [
+        "Dashboard",
+        "Programación (MRP)",
+        "Inventarios",
+        "Ventas",
+        "Descargas",
+    ]
+
+  menu = st.sidebar.radio("Selecciona un módulo:", opciones_menu)
 
   st.sidebar.markdown("---")
   st.sidebar.markdown("### Reloj del Sistema")
