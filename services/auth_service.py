@@ -27,7 +27,7 @@ def _password_matches(stored_password, provided_password):
 
 
 def authenticate_user(conn, username, password):
-    """Autenticación temporal de dev: admin pasa sin validación, resto usa BD."""
+    """Valida credenciales contra usuarios_sistema."""
     if conn is None:
         return False, "operador", "No hay conexión a la base de datos."
 
@@ -35,17 +35,12 @@ def authenticate_user(conn, username, password):
     if not username_value:
         return False, "operador", "Debes ingresar tu usuario."
 
-    normalized_username = username_value.lower()
-    if normalized_username == "admin":
-        return True, "admin", ""
-
     try:
         with conn.cursor() as cursor:
-            queries = [
+            for query in (
                 "SELECT usuario, contrasena, rol FROM public.usuarios_sistema WHERE usuario = %s LIMIT 1",
                 "SELECT usuario, contrasena, rol FROM usuarios_sistema WHERE usuario = %s LIMIT 1",
-            ]
-            for query in queries:
+            ):
                 try:
                     cursor.execute(query, (username_value,))
                     row = cursor.fetchone()
@@ -70,7 +65,6 @@ def get_menu_for_role(rol: str):
     if role == "admin":
         return [
             "Dashboard",
-            "Administración de Usuarios",
             "Programación (MRP)",
             "Inventarios",
             "Ventas",
@@ -78,6 +72,7 @@ def get_menu_for_role(rol: str):
             "Reportes",
             "Importador de Datos",
             "Herramientas de Datos",
+            "Administración de Usuarios",
         ]
 
     if role in {"supervisor", "operador", "analista", "usuario"}:
