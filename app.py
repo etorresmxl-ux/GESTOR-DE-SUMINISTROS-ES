@@ -9,7 +9,6 @@ from services.auth_service import get_menu_for_role
 
 MODULE_MAPPING = {
     "dashboard": "modules.dashboard",
-    "admin_usuarios": "modules.admin_usuarios",
     "descargas": "modules.descargas",
     "herramientas": "modules.herramientas",
     "importador": "modules.importador",
@@ -18,6 +17,7 @@ MODULE_MAPPING = {
     "programacion": "modules.programacion",
     "reportes": "modules.reportes",
     "ventas": "modules.ventas",
+    "admin_usuarios": "modules.admin_usuarios",
 }
 
 LOADED_MODULES = {}
@@ -28,9 +28,7 @@ for name, module_path in MODULE_MAPPING.items():
         st.error(f"No se pudo cargar el módulo '{module_path}': {exc}")
         st.stop()
 
-
 dashboard = LOADED_MODULES["dashboard"]
-admin_usuarios = LOADED_MODULES["admin_usuarios"]
 descargas = LOADED_MODULES["descargas"]
 herramientas = LOADED_MODULES["herramientas"]
 importador = LOADED_MODULES["importador"]
@@ -39,6 +37,7 @@ login = LOADED_MODULES["login"]
 programacion = LOADED_MODULES["programacion"]
 reportes = LOADED_MODULES["reportes"]
 ventas = LOADED_MODULES["ventas"]
+admin_usuarios = LOADED_MODULES["admin_usuarios"]
 
 
 st.set_page_config(
@@ -145,11 +144,6 @@ else:
 
     if menu == "Dashboard":
         dashboard.render(conn)
-    elif menu == "Administración de Usuarios":
-        if rol_logueado != "admin":
-            st.error("No tienes permisos para acceder a Administración de Usuarios.")
-            st.stop()
-        admin_usuarios.render(conn)
     elif menu == "Programación (MRP)":
         programacion.render(conn)
     elif menu == "Inventarios":
@@ -173,3 +167,8 @@ else:
             st.error("No tienes permisos para acceder a Herramientas de Datos.")
             st.stop()
         herramientas.render(conn)
+    elif menu == "Administración de Usuarios":
+        if rol_logueado != "admin":
+            st.error("No tienes permisos para acceder a Administración de Usuarios.")
+            st.stop()
+        admin_usuarios.render(conn)
