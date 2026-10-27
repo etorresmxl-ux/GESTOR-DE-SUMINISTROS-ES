@@ -1,172 +1,157 @@
 import pandas as pd
 
-DIAS_SEMANA = ["lun.", "mar.", "mié.", "jue.", "vie.", "sáb.", "dom."]
-MESES = [
-    "ene.", "feb.", "mar.", "abr.", "may.", "jun.",
-    "jul.", "ago.", "sep.", "oct.", "nov.", "dic.",
-]
-PRODUCTOS_ORDEN = ["REGULAR", "PREMIUM", "DIESEL"]
-COLOR_PRODUCTO = {
-    "REGULAR": "#1e8449",
-    "PREMIUM": "#d35400",
-    "DIESEL": "#5d6d7e",
-}
+PRODUCTOS_INVENTARIO = ("regular", "premium", "diesel")
 
 
-def _clave_producto(texto):
-    p = str(texto).strip().lower()
-    if "regular" in p or "magna" in p:
-        return "REGULAR"
-    if "premium" in p:
-        return "PREMIUM"
-    if "diesel" in p:
-        return "DIESEL"
-    return str(texto).strip().upper()
+def normalizar_producto_inventario(producto):
+    valor = str(producto).strip().lower()
+    if "regular" in valor or "magna" in valor:
+        return "regular"
+    if "premium" in valor:
+        return "premium"
+    if "diesel" in valor:
+        return "diesel"
+    return valor
 
 
-def _etiqueta_fecha(f):
-    return f"{DIAS_SEMANA[f.weekday()]} {f.day:02d}-{MESES[f.month - 1]}"
+def formatear_ids_estaciones(ids_estaciones):
+    if not ids_estaciones:
+        return "()"
+    if len(ids_estaciones) == 1:
+        return f"('{ids_estaciones[0]}')"
+    return str(tuple(ids_estaciones))
 
 
-def construir_calendario(df_ordenes, productos_estacion, hoy):
-    """Calendario de cargas registradas: una fila por producto, una columna por día."""
-    o = df_ordenes.copy()
-    o["fecha"] = pd.to_datetime(o["fecha_programacion"]).dt.date
-    o["prod"] = o["producto"].map(_clave_producto)
-    o["vol"] = pd.to_numeric(o["volumen_programado"], errors="coerce").fillna(0.0)
+def obtener_tanques_por_estaciones(conn, ids_estaciones):
+    tanques_estaciones = {}
+    if not ids_estaciones:
+        return tanques_estaciones
 
-    lunes_actual = hoy - pd.Timedelta(days=hoy.weekday())
-    fechas = [lunes_actual + pd.Timedelta(days=i) for i in range(14)]
-
-    fuera = int((o["fecha"] > fechas[-1]).sum()) + int((o["fecha"] < fechas[0]).sum())
-    con_ordenes = set(o["prod"])
-    productos = [p for p in PRODUCTOS_ORDEN if p in productos_estacion or p in con_ordenes] or PRODUCTOS_ORDEN
-    totales = o.groupby(["prod", "fecha"])["vol"].sum()
-
-    tabla = pd.DataFrame(
-        "",
-        index=[p.capitalize() for p in productos],
-        columns=[_etiqueta_fecha(f) for f in fechas],
-    )
-    for p in productos:
-        for f in fechas:
-            v = totales.get((p, f), 0.0)
-            if v > 0:
-                tabla.loc[p.capitalize(), _etiqueta_fecha(f)] = f"{v:,.0f}"
-    return tabla, fuera
-
-
-def estilo_calendario(tabla):
-    """Pinta solo las celdas con carga, con el color de cada producto."""
-
-    def pintar(_):
-        css = pd.DataFrame("", index=tabla.index, columns=tabla.columns)
-        for etiqueta in tabla.index:
-            color = COLOR_PRODUCTO.get(etiqueta.upper(), "#5d6d7e")
-            for col in tabla.columns:
-                if tabla.loc[etiqueta, col]:
-                    css.loc[etiqueta, col] = (
-                        f"background-color: {color}; color: #ffffff; font-weight: 600;"
-                    )
-        return css
-
-    return tabla.style.apply(pintar, axis=None)
-
-
-def obtener_capacidades_por_estacion(conn, estacion_id):
-    capacidades = {}
-    productos_disponibles_estacion = set()
+    ids_str = formatear_ids_estaciones(ids_estaciones)
     try:
         query_tanques = f"""
-            SELECT producto, capacidad_maxima
+            SELECT id_estacion, producto, capacidad_maxima
             FROM tanques
-            WHERE id_estacion = '{estacion_id}';
+            WHERE id_estacion IN {ids_str};
         """
         df_tanques = pd.read_sql(query_tanques, conn)
         if not df_tanques.empty:
-            for _, r_t in df_tanques.iterrows():
-                p_raw = str(r_t["producto"]).strip().lower()
-                cap = float(r_t["capacidad_maxima"]) if pd.notna(r_t["capacidad_maxima"]) else 0.0
-
-                if "regular" in p_raw or "magna" in p_raw:
-                    p_key = "regular"
-                elif "premium" in p_raw:
-                    p_key = "premium"
-                elif "diesel" in p_raw:
-                    p_key = "diesel"
-                else:
-                    p_key = p_raw
-
-                capacidades[p_key] = cap
-                if cap > 0:
-                    productos_disponibles_estacion.add(p_key)
+            for _, rt in df_tanques.iterrows():
+                e_id = str(rt["id_estacion"]).strip()
+                p_key = normalizar_producto_inventario(rt["producto"])
+                cap = (
+                    float(rt["capacidad_maxima"])
+                    if pd.notna(rt["capacidad_maxima"])
+                    else 0.0
+                )
+                if cap <= 0:
+                    continue
+                tanques_estaciones.setdefault(e_id, set()).add(p_key)
     except Exception:
-        pass
+        return tanques_estaciones
 
-    return capacidades, productos_disponibles_estacion
-
-
-def obtener_cargas_guardadas(conn, estacion_id):
-    cargas_guardadas = {}
-    try:
-        query_cargas_db = f"""
-            SELECT fecha_programacion, producto, SUM(volumen_programado) as total_vol
-            FROM programacion_cargas
-            WHERE id_estacion = '{estacion_id}'
-            GROUP BY fecha_programacion, producto;
-        """
-        df_cargas_db = pd.read_sql(query_cargas_db, conn)
-        if not df_cargas_db.empty:
-            for _, r in df_cargas_db.iterrows():
-                f_str = str(r["fecha_programacion"]).split("T")[0]
-                p_str = str(r["producto"]).strip().lower()
-                vol = float(r["total_vol"]) if pd.notna(r["total_vol"]) else 0.0
-                cargas_guardadas[(f_str, p_str)] = vol
-    except Exception:
-        pass
-
-    return cargas_guardadas
+    return tanques_estaciones
 
 
-def obtener_inventario_actual(conn, estacion_id):
-    inv_actuales = {"regular": 0.0, "premium": 0.0, "diesel": 0.0}
-    fecha_inventario = None
-    try:
-        query_inv = f"""
-            SELECT fecha, producto, volumen
-            FROM inventarios
-            WHERE id_estacion = '{estacion_id}'
-            ORDER BY fecha DESC;
-        """
-        df_inv = pd.read_sql(query_inv, conn)
-        if not df_inv.empty:
-            fecha_inventario = df_inv["fecha"].iloc[0]
-            df_inv_reciente = df_inv[df_inv["fecha"] == fecha_inventario]
-            for _, row_i in df_inv_reciente.iterrows():
-                p_norm = str(row_i["producto"]).strip().lower()
-                vol_val = float(row_i["volumen"]) if pd.notna(row_i["volumen"]) else 0.0
-                if "regular" in p_norm or "magna" in p_norm:
-                    inv_actuales["regular"] = vol_val
-                elif "premium" in p_norm:
-                    inv_actuales["premium"] = vol_val
-                elif "diesel" in p_norm:
-                    inv_actuales["diesel"] = vol_val
-    except Exception:
-        pass
+def obtener_inventarios_existentes(conn, fecha_seleccionada, ids_estaciones):
+    if not ids_estaciones:
+        return pd.DataFrame(columns=["id_estacion", "producto", "volumen"])
 
-    return inv_actuales, fecha_inventario
+    ids_str = formatear_ids_estaciones(ids_estaciones)
+    query_inventarios_previos = f"""
+        SELECT id_estacion, producto, volumen
+        FROM inventarios
+        WHERE fecha = '{fecha_seleccionada}'
+          AND id_estacion IN {ids_str};
+    """
+    return pd.read_sql(query_inventarios_previos, conn)
+
+
+def construir_matriz_inventario(df_estaciones, tanques_estaciones, df_existentes):
+    df = df_estaciones.copy()
+    for campo in ("Regular", "Premium", "Diesel"):
+        df[campo] = None
+
+    mapeo = {
+        "Regular": "regular",
+        "Premium": "premium",
+        "Diesel": "diesel",
+    }
+
+    for idx, row in df.iterrows():
+        e_id = row["ID"]
+        prods_disp = tanques_estaciones.get(e_id, set(PRODUCTOS_INVENTARIO))
+        for campo, producto_key in mapeo.items():
+            if producto_key in prods_disp:
+                df.loc[idx, campo] = 0
+
+    if not df_existentes.empty:
+        df_existentes = df_existentes.copy()
+        df_existentes["producto_norm"] = df_existentes["producto"].map(
+            normalizar_producto_inventario
+        )
+
+        for idx, row in df.iterrows():
+            e_id = row["ID"]
+            prods_disp = tanques_estaciones.get(e_id, set(PRODUCTOS_INVENTARIO))
+            for campo, producto_key in mapeo.items():
+                if producto_key not in prods_disp:
+                    continue
+
+                coincidencias = df_existentes[
+                    (df_existentes["id_estacion"] == e_id)
+                    & (df_existentes["producto_norm"] == producto_key)
+                ]
+                if coincidencias.empty:
+                    df.loc[idx, campo] = 0
+                    continue
+
+                volumen = coincidencias.iloc[0].get("volumen")
+                df.loc[idx, campo] = int(float(volumen)) if pd.notna(volumen) else 0
+
+    return df
+
+
+def guardar_inventarios(conn, df_editado, tanques_estaciones, fecha_seleccionada):
+    cursor = conn.cursor()
+    sql_upsert_inv = """
+        INSERT INTO inventarios (fecha, id_estacion, producto, volumen)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (fecha, id_estacion, producto)
+        DO UPDATE SET volumen = EXCLUDED.volumen;
+    """
+    count = 0
+    fecha_str = str(fecha_seleccionada)
+
+    for _, row in df_editado.iterrows():
+        e_id = str(row["ID"])
+        prods_disp = tanques_estaciones.get(e_id, set(PRODUCTOS_INVENTARIO))
+        productos_data = [
+            ("regular", row["Regular"]),
+            ("premium", row["Premium"]),
+            ("diesel", row["Diesel"]),
+        ]
+
+        for producto_key, vol_val in productos_data:
+            if producto_key not in prods_disp:
+                continue
+            if pd.notna(vol_val) and float(vol_val) >= 0:
+                cursor.execute(
+                    sql_upsert_inv,
+                    (fecha_str, e_id, producto_key, float(vol_val)),
+                )
+                count += 1
+
+    conn.commit()
+    cursor.close()
+    return count
 
 
 __all__ = [
-    "DIAS_SEMANA",
-    "MESES",
-    "PRODUCTOS_ORDEN",
-    "COLOR_PRODUCTO",
-    "_clave_producto",
-    "_etiqueta_fecha",
-    "construir_calendario",
-    "estilo_calendario",
-    "obtener_capacidades_por_estacion",
-    "obtener_cargas_guardadas",
-    "obtener_inventario_actual",
+    "normalizar_producto_inventario",
+    "formatear_ids_estaciones",
+    "obtener_tanques_por_estaciones",
+    "obtener_inventarios_existentes",
+    "construir_matriz_inventario",
+    "guardar_inventarios",
 ]
