@@ -12,7 +12,7 @@ def _normalize_role(role_value):
 
 
 def render(conn):
-    """Módulo para administrar usuarios y asignación de estaciones."""
+    """Módulo para administrar usuarios y estaciones asignadas."""
     rol_actual = st.session_state.get("rol_actual", "").lower()
     if rol_actual != "admin":
         st.error("Solo el administrador puede acceder a esta sección.")
@@ -55,7 +55,7 @@ def render(conn):
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT ue.usuario, ue.id_estacion, e.nombre, e.plaza, ue.rol
+                SELECT ue.usuario, ue.id_estacion, e.nombre, e.plaza
                 FROM public.usuarios_estaciones ue
                 LEFT JOIN public.estaciones e ON e.id_estacion = ue.id_estacion
                 ORDER BY ue.usuario, ue.id_estacion
@@ -67,7 +67,10 @@ def render(conn):
         asignaciones = []
 
     if asignaciones:
-        df_asignaciones = pd.DataFrame(asignaciones, columns=["usuario", "id_estacion", "nombre_estacion", "plaza", "rol"])
+        df_asignaciones = pd.DataFrame(
+            asignaciones,
+            columns=["usuario", "id_estacion", "nombre_estacion", "plaza"],
+        )
         st.markdown("---")
         st.subheader("Asignación actual de estaciones")
         st.dataframe(df_asignaciones, use_container_width=True, hide_index=True)
@@ -90,6 +93,7 @@ def render(conn):
         try:
             hash_password = _hash_password(password)
             role_value = _normalize_role(rol)
+
             with conn.cursor() as cursor:
                 cursor.execute(
                     "SELECT 1 FROM public.usuarios_sistema WHERE usuario = %s LIMIT 1",
@@ -160,9 +164,6 @@ def render(conn):
             else:
                 id_estacion = estacion_seleccionada.split(" - ", 1)[0].strip()
                 try:
-                    role_value = _normalize_role(
-                        next((rol_user for usuario_user, rol_user in usuarios if usuario_user == usuario_estacion), "usuario")
-                    )
                     with conn.cursor() as cursor:
                         cursor.execute(
                             "SELECT 1 FROM public.usuarios_estaciones WHERE usuario = %s AND id_estacion = %s LIMIT 1",
@@ -172,14 +173,15 @@ def render(conn):
 
                         if existe:
                             cursor.execute(
-                                "UPDATE public.usuarios_estaciones SET rol = %s WHERE usuario = %s AND id_estacion = %s",
-                                (role_value, usuario_estacion, id_estacion),
+                                "UPDATE public.usuarios_estaciones SET usuario = %s WHERE usuario = %s AND id_estacion = %s",
+                                (usuario_estacion, usuario_estacion, id_estacion),
                             )
                         else:
                             cursor.execute(
-                                "INSERT INTO public.usuarios_estaciones (id_estacion, usuario, rol) VALUES (%s, %s, %s)",
-                                (id_estacion, usuario_estacion, role_value),
+                                "INSERT INTO public.usuarios_estaciones (id_estacion, usuario) VALUES (%s, %s)",
+                                (id_estacion, usuario_estacion),
                             )
+
                     conn.commit()
                     st.success(f"Asignación guardada para '{usuario_estacion}' en la estación '{id_estacion}'.")
                     st.rerun()
