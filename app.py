@@ -1,123 +1,88 @@
-from datetime import datetime, timedelta, timezone
-from database import init_connection
-from modules import (
-    dashboard,
-    descargas,
-    herramientas,
-    importador,
-    inventarios,
-    login,
-    programacion,
-    reportes,
-    ventas,
-)
-import streamlit as st
+import hashlib
 
-# --- Configuración inicial de la página y diseño responsivo móvil ---
-st.set_page_config(
-    page_title="Gestión de Suministro - Gasolineras",
-    page_icon="⛽",
-    layout="wide",
-    initial_sidebar_state="auto",  # 'auto' contrae la barra lateral automáticamente en pantallas móviles[cite: 1, 11]
-)
+import bcrypt
 
-# --- Inyección de Estilos CSS Globales para Reducir Espacios y Evitar Cortes ---
-st.markdown(
-    """
-    <style>
-    /* Dar un respiro seguro al contenedor principal para que los títulos nunca se corten */
-    .block-container {
-        padding-top: 2.5rem !important;
-        padding-bottom: 1.5rem !important;
+
+def _compare_passwords(password: str, stored_password: str) -> bool:
+    """Valida contraseñas en entornos mixtos: texto plano, SHA256/SHA512 y bcrypt."""
+    if not password or not stored_password:
+        return False
+
+    plain = str(stored_password).strip()
+    supplied = str(password)
+
+    if plain == supplied:
+        return True
+
+    try:
+        if bcrypt.checkpw(supplied.encode("utf-8"), plain.encode("utf-8")):
+            return True
+    except Exception:
+        pass
+
+    hashes = {
+        "sha256": hashlib.sha256(supplied.encode("utf-8")).hexdigest(),
+        "sha512": hashlib.sha512(supplied.encode("utf-8")).hexdigest(),
     }
 
-    /* Ajustar los márgenes de los títulos principales */
-    h1, h2, h3 {
-        margin-top: 0.5rem !important;
-        margin-bottom: 0.4rem !important;
-        padding-top: 0rem !important;
-        padding-bottom: 0rem !important;
-    }
+    return plain in hashes.values()
 
-    /* Reducir el espacio inferior de encabezados menores */
-    h4, h5, h6 {
-        margin-top: 0.4rem !important;
-        margin-bottom: 0.2rem !important;
-        padding-top: 0rem !important;
-        padding-bottom: 0rem !important;
-    }
-    
-    /* Acortar los márgenes verticales de los párrafos y textos */
-    p {
-        margin-bottom: 0.4rem !important;
-        margin-top: 0rem !important;
-    }
 
-    /* Reducir el espacio de los separadores horizontales (st.markdown("---")) */
-    hr {
-        margin-top: 0.8rem !important;
-        margin-bottom: 0.8rem !important;
-    }
+def authenticate_user(conn, usuario: str, password: str):
+    """Valida un usuario contra la tabla usuarios_sistema."""
+    if not usuario or not password:
+        return None
 
-    /* Ajustes específicos para pantallas pequeñas (Smartphones y Tablets) */
-    @media (max-width: 768px) {
-        /* Botones de ancho completo para facilitar el toque táctil */
-        .stButton button {
-            width: 100% !important;
-        }
-        /* Reducir ligeramente el tamaño del texto en tablas para mejor ajuste visual */
-        .stDataFrame {
-            font-size: 12px !important;
-        }
-        /* Minimizar los márgenes laterales del contenedor principal para aprovechar la pantalla */
-        .block-container {
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
-            padding-top: 2rem !important;
-        }
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+    try:
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT usuario, contrasena, rol, activo FROM usuarios_sistema WHERE usuario = %s LIMIT 1;",
+                (usuario,),
+            )
+        except Exception:
+            cursor.execute(
+                "SELECT usuario, contrasena, rol FROM usuarios_sistema WHERE usuario = %s LIMIT 1;",
+                (usuario,),
+            )
 
-# Inicializar conexión a base de datos
-conn = init_connection()
+        row = cursor.fetchone()
+        cursor.close()
 
-# --- CONTROL DE AUTENTICACIÓN ---
-if "autenticado" not in st.session_state:
-  st.session_state["autenticado"] = False
+        if not row:
+            return None
 
-if not st.session_state["autenticado"]:
-  # Si no ha iniciado sesión, mostramos exclusivamente la pantalla de login
-  login.render(conn)
-else:
-  # --- ZONA PRIVADA (Usuario Autenticado) ---
-  # Recuperamos los datos de la sesión de forma segura
-  usuario_logueado = st.session_state.get("usuario_actual", "")
-  rol_logueado = st.session_state.get("rol_actual", "")
+        if len(row) >= 4 and row[3] is False:
+            return None
 
-  # --- BARRA LATERAL DE NAVEGACIÓN (Solo se dibuja si ya inició sesión) ---
-  st.sidebar.markdown("## ⛽ Gestión de Suministro")
-  st.sidebar.markdown(f"👤  **Usuario:**  {usuario_logueado} ({rol_logueado})")
-  st.sidebar.markdown("---")
-  st.sidebar.markdown("### Navegación")
+        stored_password = str(row[1]) if row[1] is not None else ""
+        rol = str(row[2]) if len(row) > 2 and row[2] is not None else "operador"
 
-  # Definir módulos disponibles según el rol del usuario
-  if rol_logueado == "admin":
-    opciones_menu = [
-        "Dashboard",
-        "Programación (MRP)",
-        "Inventarios",
-        "Ventas",
-        "Descargas",
-        "Reportes",
-        "Importador de Datos",
-        "Herramientas de Datos",
-    ]
-  else:
-    # Menú restringido exclusivamente para operadores
-    opciones_menu = [
+        if not _compare_passwords(password, stored_password):
+            return None
+
+        return {"usuario": row[0], "rol": rol}
+    except Exception:
+        return None
+
+
+def get_menu_for_role(rol: str):
+    """Devuelve la lista de módulos visibles según el rol."""
+    role = (rol or "").strip().lower()
+
+    if role == "admin":
+        return [
+            "Dashboard",
+            "Programación (MRP)",
+            "Inventarios",
+            "Ventas",
+            "Descargas",
+            "Reportes",
+            "Importador de Datos",
+            "Herramientas de Datos",
+        ]
+
+    return [
         "Dashboard",
         "Programación (MRP)",
         "Inventarios",
@@ -125,40 +90,15 @@ else:
         "Descargas",
     ]
 
-  menu = st.sidebar.radio("Selecciona un módulo:", opciones_menu)
 
-  st.sidebar.markdown("---")
-  st.sidebar.markdown("### Reloj del Sistema")
-  tz_local = timezone(timedelta(hours=-7))
-  ahora_local = datetime.now(tz_local)
-  st.sidebar.write(f"📅 {ahora_local.strftime('%Y-%m-%d')}")
-  st.sidebar.write(f"⏰ {ahora_local.strftime('%H:%M:%S (UTC-7)')}")
+def can_access_module(rol: str, modulo: str) -> bool:
+    """Determina si el rol puede acceder a un módulo."""
+    menu = get_menu_for_role(rol)
+    return modulo in menu
 
-  st.sidebar.markdown("---")
-  if st.sidebar.button("🔄 Refrescar Base de Datos", use_container_width=True):
-    st.cache_data.clear()
-    st.success("¡Caché refrescada con éxito!")
-    st.rerun()
 
-  st.sidebar.markdown("---")
-  if st.sidebar.button("🚪 Cerrar Sesión", use_container_width=True):
-    st.session_state["autenticado"] = False
-    st.rerun()
-
-  # --- ENRUTAMIENTO DE MÓDULOS ---
-  if menu == "Dashboard":
-    dashboard.render(conn)
-  elif menu == "Programación (MRP)":
-    programacion.render(conn)
-  elif menu == "Inventarios":
-    inventarios.render(conn)
-  elif menu == "Ventas":
-    ventas.render(conn)
-  elif menu == "Descargas":
-    descargas.render(conn)
-  elif menu == "Reportes":
-    reportes.render(conn)
-  elif menu == "Importador de Datos":
-    importador.render(conn)
-  elif menu == "Herramientas de Datos":
-    herramientas.render(conn)
+__all__ = [
+    "authenticate_user",
+    "get_menu_for_role",
+    "can_access_module",
+]
