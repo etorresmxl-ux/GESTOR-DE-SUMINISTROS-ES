@@ -4,7 +4,7 @@ from services.auth_service import authenticate_user
 
 
 def render(conn):
-    """Pantalla de login usando la tabla usuarios_sistema."""
+    """Renderiza la pantalla de autenticación usando la tabla usuarios_sistema."""
     st.title("🔐 Iniciar sesión")
     st.write("Ingresa tus credenciales para continuar.")
 
