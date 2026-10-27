@@ -1,12 +1,10 @@
 import streamlit as st
 
+from services.auth_service import authenticate_user
+
 
 def render(conn):
-    """Renderiza la pantalla de autenticación.
-
-    Esta vista no debe importar el paquete `modules` ni otros módulos del
-    paquete, porque eso provoca ciclos de importación al cargarse `app.py`.
-    """
+    """Renderiza la pantalla de autenticación usando la tabla usuarios_sistema."""
     st.title("🔐 Iniciar sesión")
     st.write("Ingresa tus credenciales para continuar.")
 
@@ -33,13 +31,15 @@ def render(conn):
         st.warning("Debes ingresar usuario y contraseña.")
         return
 
-    # Autenticación temporal, sin depender de otros módulos.
-    # Reemplazar esta validación por la lógica real contra la base de datos.
-    if usuario and password:
-        st.session_state["autenticado"] = True
-        st.session_state["usuario_actual"] = usuario
-        st.session_state["rol_actual"] = "admin" if usuario.lower() == "admin" else "operador"
-        st.rerun()
+    ok, rol, mensaje = authenticate_user(conn, usuario, password)
+    if not ok:
+        st.error(mensaje or "Usuario o contraseña incorrectos.")
+        return
+
+    st.session_state["autenticado"] = True
+    st.session_state["usuario_actual"] = usuario
+    st.session_state["rol_actual"] = rol
+    st.rerun()
 
 
 __all__ = ["render"]
