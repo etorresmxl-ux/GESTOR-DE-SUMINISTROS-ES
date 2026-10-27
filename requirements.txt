@@ -1,91 +1,23 @@
-import bcrypt
-
-
-def verify_password(password: str, stored_hash: str) -> bool:
-    """Verifica contraseñas usando bcrypt.
-
-    La base en Supabase ya tiene valores con prefijo $2a$, lo que indica que
-    están almacenados como hashes bcrypt. Se mantiene una compatibilidad mínima
-    con texto plano durante transiciones, pero la validación segura base es bcrypt.
-    """
-    if not password or not stored_hash:
-        return False
-
-    stored_hash = str(stored_hash).strip()
-    supplied = str(password)
-
-    try:
-        if bcrypt.checkpw(supplied.encode("utf-8"), stored_hash.encode("utf-8")):
-            return True
-    except Exception:
-        pass
-
-    # Fallback temporal para migración si aún quedan valores en texto plano.
-    return supplied == stored_hash
-
-
-def authenticate_user(conn, usuario: str, password: str):
-    """Valida un usuario contra la tabla usuarios_sistema."""
-    if not usuario or not password:
-        return None
-
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT usuario, contrasena, rol FROM usuarios_sistema WHERE usuario = %s LIMIT 1;",
-            (usuario,),
-        )
-        row = cursor.fetchone()
-        cursor.close()
-
-        if not row:
-            return None
-
-        stored_password = str(row[1]) if row[1] is not None else ""
-        rol = str(row[2]) if len(row) > 2 and row[2] is not None else "operador"
-
-        if not verify_password(password, stored_password):
-            return None
-
-        return {"usuario": row[0], "rol": rol}
-    except Exception:
-        return None
-
-
-def get_menu_for_role(rol: str):
-    """Devuelve la lista de módulos visibles según el rol."""
-    role = (rol or "").strip().lower()
-
-    if role == "admin":
-        return [
-            "Dashboard",
-            "Programación (MRP)",
-            "Inventarios",
-            "Ventas",
-            "Descargas",
-            "Reportes",
-            "Importador de Datos",
-            "Herramientas de Datos",
-        ]
-
-    return [
-        "Dashboard",
-        "Programación (MRP)",
-        "Inventarios",
-        "Ventas",
-        "Descargas",
-    ]
-
-
-def can_access_module(rol: str, modulo: str) -> bool:
-    """Determina si el rol puede acceder a un módulo."""
-    menu = get_menu_for_role(rol)
-    return modulo in menu
-
+from . import (
+    dashboard,
+    descargas,
+    herramientas,
+    importador,
+    inventarios,
+    login,
+    programacion,
+    reportes,
+    ventas,
+)
 
 __all__ = [
-    "verify_password",
-    "authenticate_user",
-    "get_menu_for_role",
-    "can_access_module",
+    "dashboard",
+    "descargas",
+    "herramientas",
+    "importador",
+    "inventarios",
+    "login",
+    "programacion",
+    "reportes",
+    "ventas",
 ]
