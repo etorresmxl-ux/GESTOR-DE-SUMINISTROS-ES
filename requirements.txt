@@ -1,33 +1,91 @@
-import streamlit as st
-
-from services.auth_service import authenticate_user
+import bcrypt
 
 
-def render(conn):
-    """Muestra la pantalla de inicio de sesión y valida contra la tabla usuarios_sistema."""
-    st.markdown("## 🔐 Iniciar Sesión - Gestión de Suministro")
-    st.write("Por favor, ingresa tus credenciales asignadas para continuar.")
+def verify_password(password: str, stored_hash: str) -> bool:
+    """Verifica contraseñas usando bcrypt.
 
-    with st.form("form_login"):
-        usuario_input = st.text_input("👤 Usuario:")
-        password_input = st.text_input("🔑 Contraseña:", type="password")
-        submit_login = st.form_submit_button("🚀 Ingresar", use_container_width=True)
+    La base en Supabase ya tiene valores con prefijo $2a$, lo que indica que
+    están almacenados como hashes bcrypt. Se mantiene una compatibilidad mínima
+    con texto plano durante transiciones, pero la validación segura base es bcrypt.
+    """
+    if not password or not stored_hash:
+        return False
 
-        if submit_login:
-            if not usuario_input or not password_input:
-                st.warning("⚠️ Por favor ingresa tu usuario y contraseña.")
-                return
+    stored_hash = str(stored_hash).strip()
+    supplied = str(password)
 
-            try:
-                auth_result = authenticate_user(conn, usuario_input, password_input)
+    try:
+        if bcrypt.checkpw(supplied.encode("utf-8"), stored_hash.encode("utf-8")):
+            return True
+    except Exception:
+        pass
 
-                if auth_result:
-                    st.session_state["autenticado"] = True
-                    st.session_state["usuario_actual"] = auth_result["usuario"]
-                    st.session_state["rol_actual"] = auth_result["rol"]
-                    st.success("¡Inicio de sesión exitoso! Accediendo...")
-                    st.rerun()
-                else:
-                    st.error("❌ Usuario o contraseña incorrectos. Verifica tus datos.")
-            except Exception as e:
-                st.error(f"Error al conectar con la base de datos: {e}")
+    # Fallback temporal para migración si aún quedan valores en texto plano.
+    return supplied == stored_hash
+
+
+def authenticate_user(conn, usuario: str, password: str):
+    """Valida un usuario contra la tabla usuarios_sistema."""
+    if not usuario or not password:
+        return None
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT usuario, contrasena, rol FROM usuarios_sistema WHERE usuario = %s LIMIT 1;",
+            (usuario,),
+        )
+        row = cursor.fetchone()
+        cursor.close()
+
+        if not row:
+            return None
+
+        stored_password = str(row[1]) if row[1] is not None else ""
+        rol = str(row[2]) if len(row) > 2 and row[2] is not None else "operador"
+
+        if not verify_password(password, stored_password):
+            return None
+
+        return {"usuario": row[0], "rol": rol}
+    except Exception:
+        return None
+
+
+def get_menu_for_role(rol: str):
+    """Devuelve la lista de módulos visibles según el rol."""
+    role = (rol or "").strip().lower()
+
+    if role == "admin":
+        return [
+            "Dashboard",
+            "Programación (MRP)",
+            "Inventarios",
+            "Ventas",
+            "Descargas",
+            "Reportes",
+            "Importador de Datos",
+            "Herramientas de Datos",
+        ]
+
+    return [
+        "Dashboard",
+        "Programación (MRP)",
+        "Inventarios",
+        "Ventas",
+        "Descargas",
+    ]
+
+
+def can_access_module(rol: str, modulo: str) -> bool:
+    """Determina si el rol puede acceder a un módulo."""
+    menu = get_menu_for_role(rol)
+    return modulo in menu
+
+
+__all__ = [
+    "verify_password",
+    "authenticate_user",
+    "get_menu_for_role",
+    "can_access_module",
+]
