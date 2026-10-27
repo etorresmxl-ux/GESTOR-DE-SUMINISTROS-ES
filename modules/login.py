@@ -1,10 +1,9 @@
 import streamlit as st
 
-from services.auth_service import authenticate_user
+from services.auth_service import authenticate_user, get_estaciones_usuario
 
 
 def render(conn):
-    """Renderiza la pantalla de autenticación usando la tabla usuarios_sistema."""
     st.title("🔐 Iniciar sesión")
     st.write("Ingresa tus credenciales para continuar.")
 
@@ -36,9 +35,14 @@ def render(conn):
         st.error(mensaje or "Usuario o contraseña incorrectos.")
         return
 
+    estaciones = get_estaciones_usuario(conn, usuario)
+
     st.session_state["autenticado"] = True
     st.session_state["usuario_actual"] = usuario
     st.session_state["rol_actual"] = rol
+    st.session_state["usuario_estaciones"] = estaciones
+    st.session_state["estacion_actual"] = estaciones[0] if estaciones else None
+
     st.rerun()
 
 
