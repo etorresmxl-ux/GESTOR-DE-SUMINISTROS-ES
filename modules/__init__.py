@@ -1,4 +1,5 @@
 __all__ = [
+    "admin_usuarios",
     "dashboard",
     "descargas",
     "herramientas",
