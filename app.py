@@ -39,7 +39,6 @@ reportes = LOADED_MODULES["reportes"]
 ventas = LOADED_MODULES["ventas"]
 admin_usuarios = LOADED_MODULES["admin_usuarios"]
 
-
 st.set_page_config(
     page_title="Gestión de Suministro - Gasolineras",
     page_icon="⛽",
@@ -115,7 +114,7 @@ else:
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Navegación")
 
-    opciones_menu = get_menu_for_role(rol_logueado)
+    opciones_menu = get_menu_for_role(conn, usuario_logueado)
     if not opciones_menu:
         st.sidebar.warning("No tienes permisos para acceder a esta aplicación.")
         st.stop()
@@ -140,6 +139,8 @@ else:
         st.session_state["autenticado"] = False
         st.session_state["usuario_actual"] = ""
         st.session_state["rol_actual"] = ""
+        st.session_state["usuario_estaciones"] = []
+        st.session_state["estacion_actual"] = None
         st.rerun()
 
     if menu == "Dashboard":
