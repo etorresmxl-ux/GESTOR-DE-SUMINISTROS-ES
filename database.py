@@ -4,8 +4,7 @@ import streamlit as st
 import psycopg2
 
 from config import get_database_url
-
-logger = logging.getLogger(__name__)
+from logging_config import logger
 
 
 def init_connection():
@@ -25,6 +24,7 @@ def init_connection():
     try:
         conn = psycopg2.connect(db_url)
         conn.autocommit = False
+        logger.info("Conexión a la base de datos establecida correctamente.")
         return conn
     except Exception as exc:
         message = f"Error al conectar con la base de datos: {exc}"
@@ -38,5 +38,6 @@ def close_connection(conn):
     if conn is not None:
         try:
             conn.close()
-        except Exception:
-            pass
+            logger.info("Conexión a la base de datos cerrada correctamente.")
+        except Exception as exc:
+            logger.warning(f"No se pudo cerrar la conexión a la base de datos: {exc}")

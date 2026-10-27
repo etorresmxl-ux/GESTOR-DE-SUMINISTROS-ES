@@ -1,0 +1,176 @@
+from datetime import datetime, timedelta, timezone
+
+import streamlit as st
+
+from database import init_connection
+from logging_config import configure_logging
+from modules import (
+    dashboard,
+    descargas,
+    herramientas,
+    importador,
+    inventarios,
+    login,
+    programacion,
+    reportes,
+    ventas,
+)
+
+configure_logging()
+
+# --- Configuración inicial de la página y diseño responsivo móvil ---
+st.set_page_config(
+    page_title="Gestión de Suministro - Gasolineras",
+    page_icon="⛽",
+    layout="wide",
+    initial_sidebar_state="auto",
+)
+
+# --- Inyección de Estilos CSS Globales para Reducir Espacios y Evitar Cortes ---
+st.markdown(
+    """
+    <style>
+    /* Dar un respiro seguro al contenedor principal para que los títulos nunca se corten */
+    .block-container {
+        padding-top: 2.5rem !important;
+        padding-bottom: 1.5rem !important;
+    }
+
+    /* Ajustar los márgenes de los títulos principales */
+    h1, h2, h3 {
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.4rem !important;
+        padding-top: 0rem !important;
+        padding-bottom: 0rem !important;
+    }
+
+    /* Reducir el espacio inferior de encabezados menores */
+    h4, h5, h6 {
+        margin-top: 0.4rem !important;
+        margin-bottom: 0.2rem !important;
+        padding-top: 0rem !important;
+        padding-bottom: 0rem !important;
+    }
+
+    /* Acortar los márgenes verticales de los párrafos y textos */
+    p {
+        margin-bottom: 0.4rem !important;
+        margin-top: 0rem !important;
+    }
+
+    /* Reducir el espacio de los separadores horizontales (st.markdown("---")) */
+    hr {
+        margin-top: 0.8rem !important;
+        margin-bottom: 0.8rem !important;
+    }
+
+    /* Ajustes específicos para pantallas pequeñas (Smartphones y Tablets) */
+    @media (max-width: 768px) {
+        /* Botones de ancho completo para facilitar el toque táctil */
+        .stButton button {
+            width: 100% !important;
+        }
+        /* Reducir ligeramente el tamaño del texto en tablas para mejor ajuste visual */
+        .stDataFrame {
+            font-size: 12px !important;
+        }
+        /* Minimizar los márgenes laterales del contenedor principal para aprovechar la pantalla */
+        .block-container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+            padding-top: 2rem !important;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Inicializar conexión a base de datos
+conn = init_connection()
+
+if conn is None:
+    st.warning(
+        "La aplicación no pudo conectarse a la base de datos. "
+        "Verifica la configuración del entorno o el secreto de Supabase."
+    )
+    st.stop()
+
+# --- CONTROL DE AUTENTICACIÓN ---
+if "autenticado" not in st.session_state:
+    st.session_state["autenticado"] = False
+
+if not st.session_state["autenticado"]:
+    # Si no ha iniciado sesión, mostramos exclusivamente la pantalla de login
+    login.render(conn)
+else:
+    # --- ZONA PRIVADA (Usuario Autenticado) ---
+    # Recuperamos los datos de la sesión de forma segura
+    usuario_logueado = st.session_state.get("usuario_actual", "")
+    rol_logueado = st.session_state.get("rol_actual", "")
+
+    # --- BARRA LATERAL DE NAVEGACIÓN (Solo se dibuja si ya inició sesión) ---
+    st.sidebar.markdown("## ⛽ Gestión de Suministro")
+    st.sidebar.markdown(f"👤  **Usuario:**  {usuario_logueado} ({rol_logueado})")
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### Navegación")
+
+    # Definir módulos disponibles según el rol del usuario
+    if rol_logueado == "admin":
+        opciones_menu = [
+            "Dashboard",
+            "Programación (MRP)",
+            "Inventarios",
+            "Ventas",
+            "Descargas",
+            "Reportes",
+            "Importador de Datos",
+            "Herramientas de Datos",
+        ]
+    else:
+        # Menú restringido exclusivamente para operadores
+        opciones_menu = [
+            "Dashboard",
+            "Programación (MRP)",
+            "Inventarios",
+            "Ventas",
+            "Descargas",
+        ]
+
+    menu = st.sidebar.radio("Selecciona un módulo:", opciones_menu)
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### Reloj del Sistema")
+    tz_local = timezone(timedelta(hours=-7))
+    ahora_local = datetime.now(tz_local)
+    st.sidebar.write(f"📅 {ahora_local.strftime('%Y-%m-%d')}")
+    st.sidebar.write(f"⏰ {ahora_local.strftime('%H:%M:%S (UTC-7)')}")
+
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🔄 Refrescar Base de Datos", use_container_width=True):
+        st.cache_data.clear()
+        st.success("¡Caché refrescada con éxito!")
+        st.rerun()
+
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🚪 Cerrar Sesión", use_container_width=True):
+        st.session_state["autenticado"] = False
+        st.rerun()
+
+    # --- ENRUTAMIENTO DE MÓDULOS ---
+    if menu == "Dashboard":
+        dashboard.render(conn)
+    elif menu == "Programación (MRP)":
+        programacion.render(conn)
+    elif menu == "Inventarios":
+        inventarios.render(conn)
+    elif menu == "Ventas":
+        ventas.render(conn)
+    elif menu == "Descargas":
+        descargas.render(conn)
+    elif menu == "Reportes":
+        reportes.render(conn)
+    elif menu == "Importador de Datos":
+        importador.render(conn)
+    elif menu == "Herramientas de Datos":
+        herramientas.render(conn)
